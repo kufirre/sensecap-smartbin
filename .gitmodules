@@ -1,0 +1,3 @@
+[submodule "components/sensecap_sdk"]
+	path = components/sensecap_sdk
+	url = https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware
