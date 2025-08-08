@@ -1,0 +1,11 @@
+dependencies:
+  idf:
+    version: ">=5.2.1"
+  # Audio components for OpenAI realtime
+  espressif/esp_codec_dev: ^1.2.0
+  # SRTP for WebRTC
+  sepfy/srtp: "*"
+  # ESP libopus for audio encoding  
+  78/esp-opus: ^1.0.4
+  # Console support
+  espressif/console_cmd_wifi: ^1.0.0

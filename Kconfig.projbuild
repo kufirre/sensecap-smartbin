@@ -1,0 +1,21 @@
+menu "SenseCap SmartBin Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "myssid"
+        help
+            SSID (network name) for the WiFi network to connect to.
+
+    config WIFI_PASSWORD
+        string "WiFi Password"
+        default "mypassword"
+        help
+            WiFi password (WPA or WPA2) for the network.
+
+    config POSTCODE
+        string "Postcode for Council Lookup"
+        default "SW1A 1AA"
+        help
+            UK postcode to lookup council information.
+
+endmenu
