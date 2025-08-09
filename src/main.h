@@ -20,6 +20,11 @@ extern "C" void oai_http_request(char *offer, char *answer);
 
 extern "C" int cmd_init(void);
 
+// Voice Activity Detection (VAD) Configuration
+#define VAD_THRESHOLD_VOICE 150          // Volume threshold to detect voice
+#define VAD_SILENCE_TIMEOUT_MS 2000      // Stop sending after 2 seconds of silence
+#define VAD_MIN_VOICE_DURATION_MS 100    // Minimum voice duration to start sending
+
 // Provided by SenseCAP SDK example; declare here for use in app_main
 extern "C" void board_init(void);
 extern "C" void long_press_event_cb(void);

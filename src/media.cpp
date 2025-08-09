@@ -2,6 +2,7 @@
 #include <opus.h>
 #include <esp_log.h>
 #include <esp_codec_dev.h>
+#include <esp_timer.h>
 #include <peer.h>
 #include <cstring>
 
@@ -66,15 +67,26 @@ void oai_audio_decode(uint8_t *data, size_t size) {
     return;
   }
   
+  // Enhanced debug logging for OpenAI audio responses
+  static int packet_count = 0;
+  static uint64_t total_bytes = 0;
+  packet_count++;
+  total_bytes += size;
+  
   int decoded_size = opus_decode(opus_decoder, data, size, output_buffer, BUFFER_SAMPLES_CNT, 0);
   
   if (size > 26) {
-    ESP_LOGD(TAG, "Decoded audio: input=%d bytes, output=%d samples", size, decoded_size);
+    ESP_LOGI(TAG, "🔊 OpenAI Response #%d: %d bytes → %d samples (Total: %llu bytes)", 
+             packet_count, size, decoded_size, total_bytes);
     ui_switch_speaking();
+  } else {
+    ESP_LOGD(TAG, "Small audio packet: %d bytes (likely silence/comfort noise)", size);
   }
   
   if (decoded_size > 0) {
     esp_codec_dev_write(play_dev_handle, output_buffer, BUFFER_SAMPLES_CNT * sizeof(opus_int16));
+  } else {
+    ESP_LOGW(TAG, "OPUS decode failed: %d", decoded_size);
   }
 }
 
@@ -121,13 +133,74 @@ void oai_send_audio(PeerConnection *peer_connection) {
   
   esp_codec_dev_read(record_dev_handle, encoder_input_buffer, BUFFER_SAMPLES);
 
-  auto encoded_size = opus_encode(opus_encoder, encoder_input_buffer, BUFFER_SAMPLES_CNT,
-                                encoder_output_buffer, OPUS_OUT_BUFFER_SIZE);
-
-  if (encoded_size > 0) {
-    peer_connection_send_audio(peer_connection, encoder_output_buffer, encoded_size);
-    ESP_LOGV(TAG, "Sent %ld bytes of encoded audio", encoded_size);
+  // Voice Activity Detection (VAD) state tracking
+  static bool g_is_sending_audio = false;
+  static uint64_t g_last_voice_activity_time = 0;
+  static uint64_t g_voice_start_time = 0;
+  static int send_count = 0;
+  static int silent_count = 0;
+  static uint64_t total_sent = 0;
+  
+  // Calculate volume level for VAD
+  int32_t volume_sum = 0;
+  for (int i = 0; i < BUFFER_SAMPLES_CNT; i++) {
+    volume_sum += abs(encoder_input_buffer[i]);
+  }
+  int avg_volume = volume_sum / BUFFER_SAMPLES_CNT;
+  
+  uint64_t current_time = esp_timer_get_time() / 1000; // Convert to milliseconds
+  bool voice_detected = avg_volume > VAD_THRESHOLD_VOICE;
+  
+  // VAD State Machine
+  if (voice_detected) {
+    g_last_voice_activity_time = current_time;
+    if (!g_is_sending_audio) {
+      g_voice_start_time = current_time;
+    }
+    // Only start sending after minimum voice duration to avoid false positives
+    if ((current_time - g_voice_start_time) >= VAD_MIN_VOICE_DURATION_MS) {
+      if (!g_is_sending_audio) {
+        ESP_LOGI(TAG, "🎤 VAD: Voice detected - starting audio transmission (vol:%d)", avg_volume);
+        g_is_sending_audio = true;
+        ui_listening(); // Show listening animation
+      }
+    }
+    silent_count = 0;
   } else {
-    ESP_LOGW(TAG, "OPUS encoding failed: %ld", encoded_size);
+    silent_count++;
+    // Stop sending if silence timeout reached
+    if (g_is_sending_audio && (current_time - g_last_voice_activity_time) >= VAD_SILENCE_TIMEOUT_MS) {
+      ESP_LOGI(TAG, "🔇 VAD: Silence timeout - stopping audio transmission (silent for %llu ms)", 
+               current_time - g_last_voice_activity_time);
+      g_is_sending_audio = false;
+    }
+  }
+  
+  // Only encode and send audio if VAD indicates we should be sending
+  if (g_is_sending_audio) {
+    auto encoded_size = opus_encode(opus_encoder, encoder_input_buffer, BUFFER_SAMPLES_CNT,
+                                  encoder_output_buffer, OPUS_OUT_BUFFER_SIZE);
+
+    if (encoded_size > 0) {
+      peer_connection_send_audio(peer_connection, encoder_output_buffer, encoded_size);
+      send_count++;
+      total_sent += encoded_size;
+      
+      if (voice_detected) {
+        ESP_LOGD(TAG, "🎤 Voice #%d: %ld bytes (vol:%d, total:%llu)", 
+                 send_count, encoded_size, avg_volume, total_sent);
+      } else {
+        ESP_LOGD(TAG, "🔇 Silence #%d: %ld bytes (vol:%d, timeout in %llu ms)", 
+                 send_count, encoded_size, avg_volume, 
+                 VAD_SILENCE_TIMEOUT_MS - (current_time - g_last_voice_activity_time));
+      }
+    } else {
+      ESP_LOGW(TAG, "OPUS encoding failed: %ld", encoded_size);
+    }
+  } else {
+    // Not sending audio - just log occasionally for debug
+    if (silent_count % 200 == 0) { // Log every ~3 seconds when not sending
+      ESP_LOGD(TAG, "🔇 VAD: Not sending (vol:%d, silent_count:%d)", avg_volume, silent_count);
+    }
   }
 }
