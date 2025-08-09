@@ -1,5 +1,5 @@
 idf_component_register(
-  SRCS "main.cpp" "camera.cpp" "api.cpp" "wifi.cpp" "council.cpp" "cmd.cpp" "webrtc.cpp" "media.cpp" "http.cpp" "ui/ui.c" "ui/assets_dummy.c" "board.c"
+  SRCS "main.cpp" "camera.cpp" "api.cpp" "wifi.cpp" "council.cpp" "cmd.cpp" "webrtc.cpp" "media.cpp" "http.cpp" "ui/ui.c" "ui/listening_A.c" "ui/listening_B.c" "ui/listening_C.c" "ui/listening_D.c" "ui/listening_E.c" "ui/speaking_A.c" "ui/speaking_B.c" "ui/speaking_C.c" "ui/speaking_D.c" "ui/speaking_E.c" "board.c"
   REQUIRES driver esp_wifi nvs_flash esp_http_client json console libpeer esp_codec_dev 78__esp-opus sensecap-watcher esp_lvgl_port esp_io_expander_pca95xx_16bit sscma_client
   INCLUDE_DIRS "." "ui"
 )

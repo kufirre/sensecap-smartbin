@@ -53,10 +53,18 @@ static void timer1_callback(lv_timer_t *timer)
 void ui_switch_speaking(void)
 {
     lvgl_port_lock(0);
+    // Hide label when showing animation
+    if (label) {
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    }
     if (!is_speaking) {
         is_speaking = true;
         current_image_index = 0;
-        lv_img_set_src(img, speaking_images[current_image_index]);
+        if (img) {
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
+            lv_img_set_src(img, speaking_images[current_image_index]);
+            lv_obj_align(img, LV_ALIGN_CENTER, 0, 0); // Re-center after setting source
+        }
         if (timer1) {
             lv_timer_reset(timer1);
         } else {
@@ -73,11 +81,17 @@ void ui_switch_speaking(void)
 void ui_listening(void)
 {
     lvgl_port_lock(0);
+    // Hide label when showing animation
+    if (label) {
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    }
     if (!img) {
         img = lv_img_create(lv_scr_act());
         lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
     }
+    lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
     lv_img_set_src(img, listening_images[current_image_index]);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0); // Re-center after setting source
     if (!timer2) {
         timer2 = lv_timer_create(timer2_callback, 300, NULL);
         lv_timer_set_repeat_count(timer2, -1);
@@ -88,12 +102,41 @@ void ui_listening(void)
 void ui_wifi_connecting(void)
 {
     lvgl_port_lock(0);
+    // Hide image when showing text
+    if (img) {
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    }
     if (!label) {
         label = lv_label_create(lv_scr_act());
-        lv_obj_set_width(label, LV_PCT(100));
-        lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(label, LV_SIZE_CONTENT); // Auto-size to content
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        // Make text larger and centered
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     }
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(label, "Wi-Fi Connecting...");
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+    lvgl_port_unlock();
+}
+
+void ui_show_status(const char* status_text)
+{
+    lvgl_port_lock(0);
+    // Hide image when showing text
+    if (img) {
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!label) {
+        label = lv_label_create(lv_scr_act());
+        lv_obj_set_width(label, LV_SIZE_CONTENT); // Auto-size to content
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        // Make text larger and centered
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    }
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(label, status_text);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
     lvgl_port_unlock();
 }
@@ -103,15 +146,21 @@ void ui_init(void)
     lvgl_port_lock(0);
     if (!label) {
         label = lv_label_create(lv_scr_act());
-        lv_obj_set_width(label, LV_PCT(100));
-        lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(label, LV_SIZE_CONTENT); // Auto-size to content
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        // Make text larger and centered
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     }
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(label, "Configure Wifi and OpenAI key via serial port.");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
     if (!img) {
         img = lv_img_create(lv_scr_act());
         lv_obj_align(img, LV_ALIGN_CENTER, 0, 30);
     }
+    // Hide image initially
+    lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
     lvgl_port_unlock();
 }
 
