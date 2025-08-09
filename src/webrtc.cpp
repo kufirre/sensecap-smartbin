@@ -5,6 +5,7 @@
 
 #include <esp_event.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <string.h>
 #include <peer.h>
 
@@ -30,15 +31,24 @@ void oai_send_audio_task(void *user_data) {
 #endif
 
 static void oai_onconnectionstatechange_task(PeerConnectionState state, void *user_data) {
-  ESP_LOGI(TAG, "PeerConnectionState: %s", peer_connection_state_to_string(state));
+  static uint64_t connection_start_time = 0;
+  static int connection_count = 0;
+  
+  ESP_LOGI(TAG, "🌐 WebRTC State Change: %s", peer_connection_state_to_string(state));
 
   if (state == PEER_CONNECTION_DISCONNECTED || state == PEER_CONNECTION_CLOSED) {
+    if (connection_start_time > 0) {
+      uint64_t session_duration = (esp_timer_get_time() - connection_start_time) / 1000000; // seconds
+      ESP_LOGW(TAG, "💔 OpenAI session ended after %llu seconds", session_duration);
+    }
 #ifndef LINUX_BUILD
     ESP_LOGW(TAG, "WebRTC connection lost - restarting system");
     esp_restart();
 #endif
   } else if (state == PEER_CONNECTION_CONNECTED) {
-    ESP_LOGI(TAG, "WebRTC connection established - starting audio streaming");
+    connection_count++;
+    connection_start_time = esp_timer_get_time();
+    ESP_LOGI(TAG, "✅ OpenAI Realtime session #%d established - starting audio streaming", connection_count);
 #ifndef LINUX_BUILD
     // Create audio streaming task with increased memory for 16K sampling rate
     StackType_t *stack_memory = (StackType_t *)heap_caps_malloc(
@@ -50,6 +60,10 @@ static void oai_onconnectionstatechange_task(PeerConnectionState state, void *us
     xTaskCreateStaticPinnedToCore(oai_send_audio_task, "audio_publisher", 40000,
                                   NULL, 7, stack_memory, &task_buffer, 0);
 #endif
+  } else if (state == PEER_CONNECTION_CHECKING) {
+    ESP_LOGI(TAG, "🔄 Connecting to OpenAI Realtime API...");
+  } else if (state == PEER_CONNECTION_COMPLETED) {
+    ESP_LOGI(TAG, "🎯 OpenAI connection fully established and ready");
   }
 }
 

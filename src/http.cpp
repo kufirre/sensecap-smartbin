@@ -88,16 +88,20 @@ extern "C" void oai_http_request(char *offer, char *answer) {
   esp_http_client_set_header(client, "Authorization", auth_header);
   esp_http_client_set_post_field(client, offer, strlen(offer));
 
-  ESP_LOGI(TAG, "Sending WebRTC offer to OpenAI Realtime API");
+  ESP_LOGI(TAG, "📤 Sending WebRTC offer to OpenAI (%d bytes)", strlen(offer));
+  ESP_LOGD(TAG, "Offer SDP:\n%s", offer);
+  
   esp_err_t err = esp_http_client_perform(client);
   int status_code = esp_http_client_get_status_code(client);
+  int content_length = esp_http_client_get_content_length(client);
   
   if (err != ESP_OK || status_code != 201) {
-    ESP_LOGE(TAG, "HTTP request failed: %s, status: %d", esp_err_to_name(err), status_code);
+    ESP_LOGE(TAG, "❌ HTTP request failed: %s, status: %d", esp_err_to_name(err), status_code);
     esp_http_client_cleanup(client);
     return;
   }
 
-  ESP_LOGI(TAG, "OpenAI Realtime API request successful");
+  ESP_LOGI(TAG, "✅ OpenAI response: %d bytes, status: %d", content_length, status_code);
+  ESP_LOGD(TAG, "Answer SDP:\n%s", answer);
   esp_http_client_cleanup(client);
 }

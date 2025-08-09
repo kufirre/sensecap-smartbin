@@ -54,14 +54,22 @@ extern "C" void app_main(void)
 
   // WiFi connect and wait
   oai_wifi();
-  ui_listening();
+  ui_show_status("WiFi Connected!");
+  vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show status
 
   // Start realtime pipeline if key is present
   if (strlen(g_openai_api_key_buf) > 0) {
     ESP_LOGI(TAG, "OpenAI API key configured - starting realtime audio connection");
+    ui_show_status("Starting WebRTC...");
     // Use larger stack size for WebRTC task to handle audio processing
     xTaskCreate(webrtc_task, "webrtc_task", 16384, NULL, 5, &webrtc_task_handle);
+    vTaskDelay(pdMS_TO_TICKS(2000)); // Give WebRTC time to connect
+    ui_show_status("WebRTC Active - Ready to talk!");
+    vTaskDelay(pdMS_TO_TICKS(2000)); // Show status for 2 seconds
   }
+  
+  // Switch to listening mode
+  ui_listening();
 
   ESP_LOGI(TAG, "SenseCap SmartBin ready!");
   ESP_LOGI(TAG, "Features: Waste Analysis (camera), Council Lookup, OpenAI Realtime Audio");
