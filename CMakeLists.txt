@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
 
 # Ensure compatibility for subprojects with older cmake_minimum_required
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
@@ -9,7 +9,7 @@ add_compile_definitions(OPENAI_REALTIMEAPI="https://api.openai.com/v1/realtime?m
 # Include app, peer, and only the SenseCAP SDK components we use (read-only)
 set(EXTRA_COMPONENT_DIRS
   "src"
-  "components/peer"
+  "deps/libpeer"
   "components/sensecap_sdk/components/sensecap-watcher"
   "components/sensecap_sdk/components/esp_lvgl_port"
   "components/sensecap_sdk/components/esp_io_expander_pca95xx_16bit"

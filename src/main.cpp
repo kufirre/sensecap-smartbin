@@ -15,11 +15,10 @@ static const char *TAG = "SMARTBIN_MAIN";
 static TaskHandle_t webrtc_task_handle = NULL;
 
 static void webrtc_task(void *pvParameters) {
+  // Initialize audio encoder before starting WebRTC
   oai_init_audio_encoder();
-  while (1) {
-    oai_webrtc();
-    vTaskDelay(pdMS_TO_TICKS(15));
-  }
+  // Start WebRTC connection - this runs its own event loop
+  oai_webrtc();
 }
 
 // Using UI functions declared in ui.h and implemented in src/ui/ui.c
@@ -60,7 +59,8 @@ extern "C" void app_main(void)
   // Start realtime pipeline if key is present
   if (strlen(g_openai_api_key_buf) > 0) {
     ESP_LOGI(TAG, "OpenAI API key configured - starting realtime audio connection");
-    xTaskCreate(webrtc_task, "webrtc_task", 8192, NULL, 5, &webrtc_task_handle);
+    // Use larger stack size for WebRTC task to handle audio processing
+    xTaskCreate(webrtc_task, "webrtc_task", 16384, NULL, 5, &webrtc_task_handle);
   }
 
   ESP_LOGI(TAG, "SenseCap SmartBin ready!");
