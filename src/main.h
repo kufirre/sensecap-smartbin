@@ -18,12 +18,21 @@ extern "C" void oai_audio_decode(uint8_t *data, size_t size);
 extern "C" void oai_webrtc();
 extern "C" void oai_http_request(char *offer, char *answer);
 
+// Session health monitoring
+extern "C" uint64_t oai_get_last_response_time(void);
+extern "C" void oai_restart_session(void);
+extern "C" bool oai_is_session_healthy(void);
+
 extern "C" int cmd_init(void);
 
 // Voice Activity Detection (VAD) Configuration
-#define VAD_THRESHOLD_VOICE 150          // Volume threshold to detect voice
+#define VAD_THRESHOLD_VOICE 300          // Volume threshold to detect voice (increased to prevent false triggers)
 #define VAD_SILENCE_TIMEOUT_MS 2000      // Stop sending after 2 seconds of silence
 #define VAD_MIN_VOICE_DURATION_MS 100    // Minimum voice duration to start sending
+
+// Session Health Configuration
+#define SESSION_TIMEOUT_MS 30000         // Restart session if no response for 30 seconds
+#define SESSION_HEALTH_CHECK_INTERVAL_MS 5000  // Check session health every 5 seconds
 
 // Provided by SenseCAP SDK example; declare here for use in app_main
 extern "C" void board_init(void);

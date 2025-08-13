@@ -34,20 +34,13 @@ static lv_obj_t *label;
 static lv_obj_t *img;
 static uint8_t current_image_index = 0;
 static bool is_speaking = false;
-static lv_timer_t *timer1 = NULL;
-static lv_timer_t *timer2 = NULL;
+static lv_timer_t *timer2 = NULL;  // Animation timer for frames
 
 static void timer2_callback(lv_timer_t *timer)
 {
     const lv_img_dsc_t **images = is_speaking ? speaking_images : listening_images;
     current_image_index = (current_image_index + 1) % (sizeof(speaking_images) / sizeof(speaking_images[0]));
     lv_img_set_src(img, images[current_image_index]);
-}
-
-static void timer1_callback(lv_timer_t *timer)
-{
-    is_speaking = false;
-    lv_timer_reset(timer2);
 }
 
 void ui_switch_speaking(void)
@@ -65,15 +58,8 @@ void ui_switch_speaking(void)
             lv_img_set_src(img, speaking_images[current_image_index]);
             lv_obj_align(img, LV_ALIGN_CENTER, 0, 0); // Re-center after setting source
         }
-        if (timer1) {
-            lv_timer_reset(timer1);
-        } else {
-            timer1 = lv_timer_create(timer1_callback, 1000, NULL);
-        }
-    } else {
-        if (timer1) {
-            lv_timer_reset(timer1);
-        }
+        // No need for timer1 - the media layer handles speaking duration
+        // based on actual audio stream timing (3-second silence detection)
     }
     lvgl_port_unlock();
 }
@@ -81,6 +67,8 @@ void ui_switch_speaking(void)
 void ui_listening(void)
 {
     lvgl_port_lock(0);
+    // Reset speaking state when switching to listening
+    is_speaking = false;
     // Hide label when showing animation
     if (label) {
         lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
@@ -95,6 +83,9 @@ void ui_listening(void)
     if (!timer2) {
         timer2 = lv_timer_create(timer2_callback, 300, NULL);
         lv_timer_set_repeat_count(timer2, -1);
+    } else {
+        // Resume the timer if it exists
+        lv_timer_resume(timer2);
     }
     lvgl_port_unlock();
 }

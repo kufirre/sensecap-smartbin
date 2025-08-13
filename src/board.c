@@ -8,6 +8,10 @@ void board_init(void)
   lv_disp_t *lvgl_disp = bsp_lvgl_init();
   assert(lvgl_disp != NULL);
   bsp_rgb_init();
+  
+  // Set proper display brightness (80% for vibrant colors)
+  bsp_lcd_brightness_set(80);
+  
   bsp_codec_init();
   bsp_codec_volume_set(100, NULL);
 }

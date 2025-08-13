@@ -6,10 +6,10 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # Add compile definitions for OpenAI API
 add_compile_definitions(OPENAI_REALTIMEAPI="https://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17")
 
-# Include app, peer, and only the SenseCAP SDK components we use (read-only)
+# Include app, peer wrapper, and only the SenseCAP SDK components we use (read-only)
 set(EXTRA_COMPONENT_DIRS
   "src"
-  "deps/libpeer"
+  "components/peer_wrapper"
   "components/sensecap_sdk/components/sensecap-watcher"
   "components/sensecap_sdk/components/esp_lvgl_port"
   "components/sensecap_sdk/components/esp_io_expander_pca95xx_16bit"

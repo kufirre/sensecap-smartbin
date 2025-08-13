@@ -21,8 +21,11 @@ PeerConnection *peer_connection = NULL;
 StaticTask_t task_buffer;
 
 void oai_send_audio_task(void *user_data) {
+  ESP_LOGI(TAG, "🎙️ Audio task started - initializing encoder");
   oai_init_audio_encoder();
-
+  
+  ESP_LOGI(TAG, "🎙️ Starting smart VAD audio streaming (15ms intervals)");
+  ESP_LOGI(TAG, "🧠 Only sends audio when voice detected - saves API costs");
   while (1) {
     oai_send_audio(peer_connection);
     vTaskDelay(pdMS_TO_TICKS(TICK_INTERVAL));
@@ -74,6 +77,25 @@ static void oai_on_icecandidate_task(char *description, void *user_data) {
   peer_connection_set_remote_description(peer_connection, local_buffer);
 }
 
+// Session health monitoring
+static void oai_session_health_monitor(void *user_data) {
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(SESSION_HEALTH_CHECK_INTERVAL_MS));
+        
+        if (peer_connection && !oai_is_session_healthy()) {
+            ESP_LOGW(TAG, "💔 Session unhealthy - restarting WebRTC connection");
+            oai_restart_session();
+        }
+    }
+}
+
+void oai_restart_session(void) {
+    ESP_LOGW(TAG, "🔄 Restarting OpenAI session due to timeout");
+    
+    // Trigger system restart for clean recovery
+    esp_restart();
+}
+
 extern "C" void oai_webrtc() {
   ESP_LOGI(TAG, "Initializing WebRTC for OpenAI Realtime API");
   
@@ -106,6 +128,12 @@ extern "C" void oai_webrtc() {
   peer_connection_oniceconnectionstatechange(peer_connection, oai_onconnectionstatechange_task);
   peer_connection_onicecandidate(peer_connection, oai_on_icecandidate_task);
   peer_connection_create_offer(peer_connection);
+  
+  // Start session health monitoring task
+#ifndef LINUX_BUILD
+  xTaskCreate(oai_session_health_monitor, "session_health", 4096, NULL, 3, NULL);
+#endif
+  
   for (;;) {
     if (peer_connection != NULL) {
       peer_connection_loop(peer_connection);
