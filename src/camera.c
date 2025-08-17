@@ -132,7 +132,7 @@ void display_one_image(lv_obj_t *image, const unsigned char *p_data)
             img_dsc.data = heap_caps_aligned_alloc(16, img_dsc.data_size, MALLOC_CAP_SPIRAM);
         }
         start = esp_timer_get_time();
-        int ret = esp_jpeg_decoder_one_picture(decoded_str, output_len, img_dsc.data);
+        int ret = esp_jpeg_decoder_one_picture(decoded_str, output_len, (uint8_t*)img_dsc.data);
         end = esp_timer_get_time();
         ESP_LOGI(TAG, "esp_jpeg_decoder_one_picture take:%lld ms", (end - start) / 1000);
         if (ret == ESP_OK)
@@ -285,10 +285,10 @@ esp_err_t camera_init(void)
         return ESP_FAIL;
     }
 
-    // Initialize LVGL display
-    lvgl_disp = bsp_lvgl_init();
+    // Get existing LVGL display (already initialized in board_init)
+    lvgl_disp = bsp_lvgl_get_disp();
     if (lvgl_disp == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize LVGL display");
+        ESP_LOGE(TAG, "Failed to get LVGL display handle");
         return ESP_FAIL;
     }
 
@@ -481,7 +481,7 @@ esp_err_t camera_deinit(void)
 
     // Clean up resources
     if (img_dsc.data) {
-        free(img_dsc.data);
+        free((void*)img_dsc.data);
         img_dsc.data = NULL;
     }
 
