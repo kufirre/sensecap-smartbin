@@ -9,3 +9,4 @@ dependencies:
   78/esp-opus: ^1.0.4
   # Console support
   espressif/console_cmd_wifi: ^1.0.0
+  wvirgil123/esp_jpeg_simd: "^1.0.0"

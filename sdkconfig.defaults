@@ -14,13 +14,31 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# Disable external stack memory to fix SSCMA client RX buffer issues  
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=n
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=10000
+# Reduce main task stack size to match working example
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584
 # Disable watchdogs to avoid conflicts during WebRTC operation (from working example)
 CONFIG_ESP_INT_WDT=n
 CONFIG_ESP_TASK_WDT_EN=n
 # Disable ESP event posting from ISR to avoid interrupt conflicts (from working example)
 CONFIG_ESP_EVENT_POST_FROM_ISR=n
+
+# WiFi Configuration - Match working example RX buffer and BA window settings
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+
+# UART Configuration for SSCMA client communication
+CONFIG_UART_ISR_IN_IRAM=y
+
+# File system and network configuration for SSCMA client
+CONFIG_FATFS_LFN_STACK=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5744
+CONFIG_LWIP_TCP_WND_DEFAULT=5744
 
 # Application Configuration
 CONFIG_WIFI_SSID="myssid"
@@ -30,14 +48,8 @@ CONFIG_POSTCODE="SW1A 1AA"
 # HTTP Client Configuration
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 
-# I2C Driver Configuration - Match working example (use legacy driver)
-# CONFIG_I2C_SKIP_LEGACY_CONFLICT_CHECK is not set
-# CONFIG_I2C_ISR_IRAM_SAFE is not set  
-# CONFIG_I2C_ENABLE_SLAVE_DRIVER_VERSION_2 is not set
-# I2C Driver Configuration - Use new I2C driver only
-CONFIG_I2C_SKIP_LEGACY_CONFLICT_CHECK=y
-CONFIG_I2C_ISR_IRAM_SAFE=y
-# Use I2C slave driver v2.0 (recommended, v1.0 will be removed in IDF v6.0)
+# I2C Driver Configuration - Match working example (use new driver without IRAM conflicts)
+# CONFIG_I2C_ISR_IRAM_SAFE is not set
 CONFIG_I2C_ENABLE_SLAVE_DRIVER_VERSION_2=y
 # MbedTLS Configuration - Enable DTLS for peer connections
 CONFIG_MBEDTLS_SSL_PROTO_DTLS=y
@@ -54,3 +66,11 @@ CONFIG_LV_COLOR_16_SWAP=y
 CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=16
 CONFIG_BSP_LCD_PANEL_SPI_TRANS_Q_DEPTH=1
 CONFIG_LVGL_DRAW_BUFF_HEIGHT=120
+
+# LVGL Camera Requirements (from sscma_client_monitor)
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEM_BUF_MAX_NUM=32
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_USE_SJPG=y
+CONFIG_LV_USE_DEMO_WIDGETS=y
+CONFIG_LV_DEMO_WIDGETS_SLIDESHOW=y
