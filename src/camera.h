@@ -36,9 +36,10 @@ esp_err_t camera_init(void);
  * 
  * Configures the camera sensor and starts the inference/streaming
  * 
+ * @param enable_flash Whether to use LED flash during streaming (for low light)
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t camera_start_streaming(void);
+esp_err_t camera_start_streaming(bool enable_flash);
 
 /**
  * @brief Stop the camera streaming
@@ -52,9 +53,10 @@ esp_err_t camera_stop_streaming(void);
  * 
  * Takes a single photo and displays it on the screen
  * 
+ * @param enable_flash Whether to use LED flash before capture
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t camera_capture_picture(void);
+esp_err_t camera_capture_picture(bool enable_flash);
 
 /**
  * @brief Get camera module information

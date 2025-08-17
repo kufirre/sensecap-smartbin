@@ -1,5 +1,10 @@
 #include "ui.h"
 #include "esp_lvgl_port.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "sensecap-watcher.h"
 
 // Assume images are provided by lvgl assets
 extern const lv_img_dsc_t speaking_A;
@@ -35,6 +40,10 @@ static lv_obj_t *img;
 static uint8_t current_image_index = 0;
 static bool is_speaking = false;
 static lv_timer_t *timer2 = NULL;  // Animation timer for frames
+
+// Button and LED state variables
+static const char *UI_TAG = "ui";
+static bool rgb_initialized = false;
 
 static void timer2_callback(lv_timer_t *timer)
 {
@@ -153,6 +162,79 @@ void ui_init(void)
     // Hide image initially
     lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
     lvgl_port_unlock();
+}
+
+// Button and LED management functions
+
+esp_err_t ui_button_init(void (*callback)(void))
+{
+    ESP_LOGI(UI_TAG, "Initializing button...");
+    
+    if (bsp_knob_btn_init(NULL) != ESP_OK) {
+        ESP_LOGE(UI_TAG, "Failed to initialize button");
+        return ESP_FAIL;
+    }
+    
+    if (callback != NULL) {
+        bsp_set_btn_long_press_cb(callback);
+        ESP_LOGI(UI_TAG, "Button callback registered for long press");
+    }
+    
+    ESP_LOGI(UI_TAG, "Button initialized successfully");
+    return ESP_OK;
+}
+
+esp_err_t ui_camera_flash(uint32_t duration_ms)
+{
+    ESP_LOGI(UI_TAG, "Camera flash for %ld ms", duration_ms);
+    
+    // Ensure RGB is initialized
+    if (!rgb_initialized) {
+        if (bsp_rgb_init() != ESP_OK) {
+            ESP_LOGE(UI_TAG, "Failed to initialize RGB LED");
+            return ESP_FAIL;
+        }
+        rgb_initialized = true;
+    }
+    
+    // Turn on white LED for flash at 5% brightness to avoid lens glare
+    esp_err_t ret = bsp_rgb_set(13, 13, 13);  // 5% of 255 = ~13
+    if (ret != ESP_OK) {
+        ESP_LOGE(UI_TAG, "Failed to turn on camera flash");
+        return ret;
+    }
+    
+    // Wait for specified duration
+    vTaskDelay(pdMS_TO_TICKS(duration_ms));
+    
+    // Turn off LED
+    ret = bsp_rgb_set(0, 0, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(UI_TAG, "Failed to turn off camera flash");
+        return ret;
+    }
+    
+    ESP_LOGI(UI_TAG, "Camera flash completed");
+    return ESP_OK;
+}
+
+esp_err_t ui_set_rgb(uint8_t r, uint8_t g, uint8_t b)
+{
+    // Ensure RGB is initialized
+    if (!rgb_initialized) {
+        if (bsp_rgb_init() != ESP_OK) {
+            ESP_LOGE(UI_TAG, "Failed to initialize RGB LED");
+            return ESP_FAIL;
+        }
+        rgb_initialized = true;
+    }
+    
+    return bsp_rgb_set(r, g, b);
+}
+
+esp_err_t ui_rgb_off(void)
+{
+    return ui_set_rgb(0, 0, 0);
 }
 
 

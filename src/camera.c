@@ -27,6 +27,7 @@
 #include "sscma_client_ops.h"
 
 #include "esp_jpeg_dec.h"
+#include "ui/ui.h"
 
 static const char *TAG = "camera";
 
@@ -394,14 +395,14 @@ esp_err_t camera_get_info(void)
     return ESP_OK;
 }
 
-esp_err_t camera_start_streaming(void)
+esp_err_t camera_start_streaming(bool enable_flash)
 {
     if (!camera_initialized) {
         ESP_LOGE(TAG, "Camera not initialized");
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Starting camera streaming...");
+    ESP_LOGI(TAG, "Starting camera streaming (flash: %s)...", enable_flash ? "enabled" : "disabled");
 
     // Configure sensor (opt id 1 = 416x416 resolution)
     // Available options:
@@ -415,6 +416,14 @@ esp_err_t camera_start_streaming(void)
     }
 
     vTaskDelay(50 / portTICK_PERIOD_MS);
+
+    // Enable flash LED for low-light streaming if requested
+    if (enable_flash) {
+        ESP_LOGI(TAG, "Enabling continuous flash for streaming...");
+        if (ui_set_rgb(13, 13, 13) != ESP_OK) {  // 5% brightness
+            ESP_LOGW(TAG, "Failed to enable flash, continuing without it");
+        }
+    }
 
     // Start inference/streaming
     // if (sscma_client_invoke(client, -1, false, true) != ESP_OK) {
@@ -441,6 +450,11 @@ esp_err_t camera_stop_streaming(void)
 
     ESP_LOGI(TAG, "Stopping camera streaming...");
 
+    // Turn off flash LED if it was on
+    if (ui_rgb_off() != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to turn off flash LED");
+    }
+
     // Stop inference/streaming
     if (sscma_client_invoke(client, 0, false, false) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop camera streaming");
@@ -452,14 +466,14 @@ esp_err_t camera_stop_streaming(void)
     return ESP_OK;
 }
 
-esp_err_t camera_capture_picture(void)
+esp_err_t camera_capture_picture(bool enable_flash)
 {
     if (!camera_initialized) {
         ESP_LOGE(TAG, "Camera not initialized");
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Capturing single picture...");
+    ESP_LOGI(TAG, "Capturing single picture (flash: %s)...", enable_flash ? "enabled" : "disabled");
 
     // Configure sensor if not already done (opt id 1 = 416x416 resolution)
     if (sscma_client_set_sensor(client, 1, 1, true) != ESP_OK) {
@@ -468,6 +482,17 @@ esp_err_t camera_capture_picture(void)
     }
 
     vTaskDelay(50 / portTICK_PERIOD_MS);
+
+    // Flash LED for illumination before capture if enabled
+    if (enable_flash) {
+        ESP_LOGI(TAG, "Activating camera flash...");
+        if (ui_camera_flash(500) != ESP_OK) {
+            ESP_LOGW(TAG, "Camera flash failed, continuing with capture");
+        }
+        
+        // Small delay after flash before capture
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
 
     // Capture single image (times = 1)
     if (sscma_client_sample(client, 1) != ESP_OK) {

@@ -8,6 +8,7 @@
 // #include "council.h"
 // #include "cmd.h"
 #include "sensecap-watcher.h"
+#include "ui/ui.h"
 
 static const char *TAG = "SMARTBIN_MAIN";
 
@@ -16,7 +17,7 @@ static void button_capture_callback(void)
 {
   ESP_LOGI(TAG, "Button pressed - capturing picture");
   
-  if (camera_capture_picture() == ESP_OK) {
+  if (camera_capture_picture(true) == ESP_OK) {  // Enable flash for button captures
     ESP_LOGI(TAG, "✓ Picture capture initiated");
   } else {
     ESP_LOGE(TAG, "✗ Failed to capture picture");
@@ -64,14 +65,10 @@ extern "C" void app_main(void)
   ESP_LOGI(TAG, "Getting camera module information...");
   camera_get_info();
 
-  // Initialize and register button callback for picture capture
+  // Initialize button using UI component
   ESP_LOGI(TAG, "Initializing button for picture capture...");
-  if (bsp_knob_btn_init(NULL) != ESP_OK) {
+  if (ui_button_init(button_capture_callback) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize button");
-  } else {
-    ESP_LOGI(TAG, "Button initialized successfully");
-    bsp_set_btn_long_press_cb(button_capture_callback);
-    ESP_LOGI(TAG, "Button callback registered for long press");
   }
 
   // Camera is ready for picture capture
