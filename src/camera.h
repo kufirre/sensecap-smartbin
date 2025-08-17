@@ -48,6 +48,15 @@ esp_err_t camera_start_streaming(void);
 esp_err_t camera_stop_streaming(void);
 
 /**
+ * @brief Capture a single picture and display it
+ * 
+ * Takes a single photo and displays it on the screen
+ * 
+ * @return ESP_OK on success, ESP_FAIL on error
+ */
+esp_err_t camera_capture_picture(void);
+
+/**
  * @brief Get camera module information
  * 
  * @return ESP_OK on success, ESP_FAIL on error

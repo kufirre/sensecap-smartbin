@@ -452,6 +452,33 @@ esp_err_t camera_stop_streaming(void)
     return ESP_OK;
 }
 
+esp_err_t camera_capture_picture(void)
+{
+    if (!camera_initialized) {
+        ESP_LOGE(TAG, "Camera not initialized");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Capturing single picture...");
+
+    // Configure sensor if not already done (opt id 1 = 416x416 resolution)
+    if (sscma_client_set_sensor(client, 1, 1, true) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set sensor configuration");
+        return ESP_FAIL;
+    }
+
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+
+    // Capture single image (times = 1)
+    if (sscma_client_sample(client, 1) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to capture picture");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Picture capture initiated - image will appear when received");
+    return ESP_OK;
+}
+
 bool camera_is_initialized(void)
 {
     return camera_initialized;

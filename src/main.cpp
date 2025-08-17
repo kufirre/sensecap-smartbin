@@ -11,25 +11,15 @@
 
 static const char *TAG = "SMARTBIN_MAIN";
 
-// Button callback for toggling camera streaming
-static void button_toggle_callback(void)
+// Button callback for capturing a picture
+static void button_capture_callback(void)
 {
-  ESP_LOGI(TAG, "Button pressed - toggling camera stream");
+  ESP_LOGI(TAG, "Button pressed - capturing picture");
   
-  if (camera_is_streaming()) {
-    ESP_LOGI(TAG, "Stopping camera stream...");
-    if (camera_stop_streaming() == ESP_OK) {
-      ESP_LOGI(TAG, "✓ Camera stream stopped");
-    } else {
-      ESP_LOGE(TAG, "✗ Failed to stop camera stream");
-    }
+  if (camera_capture_picture() == ESP_OK) {
+    ESP_LOGI(TAG, "✓ Picture capture initiated");
   } else {
-    ESP_LOGI(TAG, "Starting camera stream...");
-    if (camera_start_streaming() == ESP_OK) {
-      ESP_LOGI(TAG, "✓ Camera stream started");
-    } else {
-      ESP_LOGE(TAG, "✗ Failed to start camera stream");
-    }
+    ESP_LOGE(TAG, "✗ Failed to capture picture");
   }
 }
 
@@ -74,26 +64,22 @@ extern "C" void app_main(void)
   ESP_LOGI(TAG, "Getting camera module information...");
   camera_get_info();
 
-  // Initialize and register button callback for stream toggle
-  ESP_LOGI(TAG, "Initializing button for stream toggle...");
+  // Initialize and register button callback for picture capture
+  ESP_LOGI(TAG, "Initializing button for picture capture...");
   if (bsp_knob_btn_init(NULL) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize button");
   } else {
     ESP_LOGI(TAG, "Button initialized successfully");
-    bsp_set_btn_long_press_cb(button_toggle_callback);
+    bsp_set_btn_long_press_cb(button_capture_callback);
     ESP_LOGI(TAG, "Button callback registered for long press");
   }
 
-  // Start camera streaming initially
-  ESP_LOGI(TAG, "Starting initial camera streaming...");
-  if (camera_start_streaming() != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start camera streaming");
-    return;
-  }
+  // Camera is ready for picture capture
+  ESP_LOGI(TAG, "Camera ready for picture capture");
 
   ESP_LOGI(TAG, "SenseCap SmartBin camera module ready!");
-  ESP_LOGI(TAG, "Features: Live camera feed with AI inference");
-  ESP_LOGI(TAG, "Controls: Long press button to toggle camera stream");
+  ESP_LOGI(TAG, "Features: Picture capture with AI inference");
+  ESP_LOGI(TAG, "Controls: Long press button to capture picture");
 
   // Main application loop
   for (;;) {
@@ -104,9 +90,9 @@ extern "C" void app_main(void)
     static int status_counter = 0;
     if (++status_counter >= 12) { // Every 60 seconds (12 * 5 seconds)
       status_counter = 0;
-      ESP_LOGI(TAG, "SmartBin status: Camera=%s, Streaming=%s", 
+      ESP_LOGI(TAG, "SmartBin status: Camera=%s, Ready=%s", 
                camera_is_initialized() ? "Active" : "Inactive",
-               camera_is_streaming() ? "ON" : "OFF");
+               camera_is_initialized() ? "YES" : "NO");
     }
   }
 
