@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sensecap-watcher.h"
+#include "iot_button.h"
 
 // Assume images are provided by lvgl assets
 extern const lv_img_dsc_t speaking_A;
@@ -44,6 +45,9 @@ static lv_timer_t *timer2 = NULL;  // Animation timer for frames
 // Button and LED state variables
 static const char *UI_TAG = "ui";
 static bool rgb_initialized = false;
+static button_handle_t button_handle = NULL;
+static void (*short_press_callback)(void) = NULL;
+static void (*long_press_callback)(void) = NULL;
 
 static void timer2_callback(lv_timer_t *timer)
 {
@@ -166,18 +170,69 @@ void ui_init(void)
 
 // Button and LED management functions
 
-esp_err_t ui_button_init(void (*callback)(void))
+// Button event callbacks
+static void button_short_press_cb(void *arg, void *data)
 {
-    ESP_LOGI(UI_TAG, "Initializing button...");
+    ESP_LOGI(UI_TAG, "Button short press detected");
+    if (short_press_callback != NULL) {
+        short_press_callback();
+    }
+}
+
+static void button_long_press_cb(void *arg, void *data)
+{
+    ESP_LOGI(UI_TAG, "Button long press detected");
+    if (long_press_callback != NULL) {
+        long_press_callback();
+    }
+}
+
+esp_err_t ui_button_init(void (*short_press_cb)(void), void (*long_press_cb)(void))
+{
+    ESP_LOGI(UI_TAG, "Initializing button with short and long press callbacks...");
     
-    if (bsp_knob_btn_init(NULL) != ESP_OK) {
-        ESP_LOGE(UI_TAG, "Failed to initialize button");
+    // Store callback functions
+    short_press_callback = short_press_cb;
+    long_press_callback = long_press_cb;
+    
+    // Create button configuration using custom button (BSP functions)
+    button_config_t btn_cfg = {
+        .type = BUTTON_TYPE_CUSTOM,
+        .long_press_time = 2000,  // 2 seconds for long press
+        .short_press_time = 200,  // 200ms for short press detection
+        .custom_button_config = {
+            .active_level = 0,
+            .button_custom_init = bsp_knob_btn_init,
+            .button_custom_deinit = bsp_knob_btn_deinit,
+            .button_custom_get_key_value = bsp_knob_btn_get_key_value,
+        },
+    };
+    
+    // Create button handle
+    button_handle = iot_button_create(&btn_cfg);
+    if (button_handle == NULL) {
+        ESP_LOGE(UI_TAG, "Failed to create button handle");
         return ESP_FAIL;
     }
     
-    if (callback != NULL) {
-        bsp_set_btn_long_press_cb(callback);
-        ESP_LOGI(UI_TAG, "Button callback registered for long press");
+    // Register short press callback (single click)
+    if (short_press_cb != NULL) {
+        esp_err_t ret = iot_button_register_cb(button_handle, BUTTON_SINGLE_CLICK, button_short_press_cb, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(UI_TAG, "Failed to register short press callback");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(UI_TAG, "Short press callback registered");
+    }
+    
+    // Register long press callback
+    if (long_press_cb != NULL) {
+        esp_err_t ret = iot_button_register_cb(button_handle, BUTTON_LONG_PRESS_START, button_long_press_cb, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(UI_TAG, "Failed to register long press callback");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(UI_TAG, "Long press callback registered");
     }
     
     ESP_LOGI(UI_TAG, "Button initialized successfully");

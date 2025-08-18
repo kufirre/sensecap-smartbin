@@ -63,15 +63,17 @@ void ui_wifi_connecting(void);
 void ui_show_status(const char* status_text);
 
 /**
- * @brief Initialize button with callback function
+ * @brief Initialize button with callback functions
  * 
- * Sets up the hardware button and registers a callback for long press events.
- * The callback will be triggered when the user performs a long press.
+ * Sets up the hardware button and registers callbacks for short and long press events.
+ * Short press is typically used for quick actions like taking a picture.
+ * Long press is typically used for power management or system functions.
  * 
- * @param callback Function to call on button long press (can be NULL)
+ * @param short_press_cb Function to call on button short press/single click (can be NULL)
+ * @param long_press_cb Function to call on button long press (can be NULL)
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t ui_button_init(void (*callback)(void));
+esp_err_t ui_button_init(void (*short_press_cb)(void), void (*long_press_cb)(void));
 
 /**
  * @brief Flash white LED for camera illumination

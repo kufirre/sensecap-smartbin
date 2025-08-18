@@ -28,6 +28,8 @@
 
 #include "esp_jpeg_dec.h"
 #include "ui/ui.h"
+#include <time.h>
+#include <sys/time.h>
 
 static const char *TAG = "camera";
 
@@ -39,14 +41,16 @@ static lv_disp_t *lvgl_disp = NULL;
 static lv_obj_t *image = NULL;
 static bool camera_initialized = false;
 static bool camera_streaming = false;
+static bool sd_card_available = false;
+static bool save_next_image_to_sd = false;
 
 #define EXAMPLE_SAVE_IMAGE_TO_SD 0
 
 #define DECODED_STR_MAX_SIZE (48 * 1024)
 static unsigned char decoded_str[DECODED_STR_MAX_SIZE];
 
-#define IMG_WIDTH  416
-#define IMG_HEIGHT 416
+#define IMG_WIDTH  640
+#define IMG_HEIGHT 480
 static lv_img_dsc_t img_dsc = {
     .header.always_zero = 0,
     .header.w = IMG_WIDTH,
@@ -55,6 +59,9 @@ static lv_img_dsc_t img_dsc = {
     .header.cf = LV_IMG_CF_TRUE_COLOR,
     .data = NULL,
 };
+// Function to save JPEG data to SD card with timestamp filename
+static esp_err_t save_jpeg_to_sd(const uint8_t *jpeg_data, size_t jpeg_size);
+
 static int esp_jpeg_decoder_one_picture(uint8_t *input_buf, int len, uint8_t *output_buf)
 {
     esp_err_t ret = ESP_OK;
@@ -128,6 +135,17 @@ void display_one_image(lv_obj_t *image, const unsigned char *p_data)
     ESP_LOGI(TAG, "mbedtls_base64_decode time:%lld ms", (end - start) / 1000);
     if (decode_ret == 0)
     {
+        // Save JPEG data to SD card if requested
+        if (save_next_image_to_sd && sd_card_available) {
+            ESP_LOGI(TAG, "Saving JPEG image to SD card...");
+            if (save_jpeg_to_sd(decoded_str, output_len) == ESP_OK) {
+                ESP_LOGI(TAG, "✓ Image saved to SD card successfully");
+            } else {
+                ESP_LOGW(TAG, "Failed to save image to SD card");
+            }
+            save_next_image_to_sd = false;  // Reset flag
+        }
+
         if (img_dsc.data == NULL)
         {
             img_dsc.data = heap_caps_aligned_alloc(16, img_dsc.data_size, MALLOC_CAP_SPIRAM);
@@ -343,6 +361,22 @@ esp_err_t camera_init(void)
         return ESP_FAIL;
     }
 
+    // Try to initialize SD card (optional)
+    ESP_LOGI(TAG, "Checking for SD card...");
+    if (bsp_sdcard_is_inserted()) {
+        ESP_LOGI(TAG, "SD card detected, initializing...");
+        if (bsp_sdcard_init_default() == ESP_OK) {
+            sd_card_available = true;
+            ESP_LOGI(TAG, "✓ SD card initialized successfully");
+        } else {
+            ESP_LOGW(TAG, "Failed to initialize SD card");
+            sd_card_available = false;
+        }
+    } else {
+        ESP_LOGI(TAG, "No SD card detected");
+        sd_card_available = false;
+    }
+
     camera_initialized = true;
     ESP_LOGI(TAG, "Camera module initialized successfully");
     return ESP_OK;
@@ -402,15 +436,15 @@ esp_err_t camera_start_streaming(bool enable_flash)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Starting camera streaming (flash: %s)...", enable_flash ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Starting camera streaming at %dx%d (flash: %s)...", IMG_WIDTH, IMG_HEIGHT, enable_flash ? "enabled" : "disabled");
 
-    // Configure sensor (opt id 1 = 416x416 resolution)
+    // Configure sensor (opt id 3 = 640x480 resolution - highest quality)
     // Available options:
     // 0: 240 x 240
     // 1: 416 x 416  
     // 2: 480 x 480
-    // 3: 640 x 480
-    if (sscma_client_set_sensor(client, 1, 1, true) != ESP_OK) {
+    // 3: 640 x 480 (VGA - highest quality)
+    if (sscma_client_set_sensor(client, 1, 3, true) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set sensor configuration");
         return ESP_FAIL;
     }
@@ -466,22 +500,29 @@ esp_err_t camera_stop_streaming(void)
     return ESP_OK;
 }
 
-esp_err_t camera_capture_picture(bool enable_flash)
+
+esp_err_t camera_capture_picture(bool enable_flash, bool save_to_sd)
 {
     if (!camera_initialized) {
         ESP_LOGE(TAG, "Camera not initialized");
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Capturing single picture (flash: %s)...", enable_flash ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Capturing single picture at %dx%d (flash: %s, SD save: %s)...", 
+             IMG_WIDTH, IMG_HEIGHT, 
+             enable_flash ? "enabled" : "disabled",
+             save_to_sd ? "enabled" : "disabled");
 
-    // Configure sensor if not already done (opt id 1 = 416x416 resolution)
-    if (sscma_client_set_sensor(client, 1, 1, true) != ESP_OK) {
+    // Configure sensor if not already done (opt id 3 = 640x480 resolution - highest quality)
+    if (sscma_client_set_sensor(client, 1, 3, true) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set sensor configuration");
         return ESP_FAIL;
     }
 
     vTaskDelay(50 / portTICK_PERIOD_MS);
+
+    // Set flag for SD save if requested
+    save_next_image_to_sd = save_to_sd;
 
     // Flash LED for illumination before capture if enabled
     if (enable_flash) {
@@ -570,3 +611,43 @@ esp_err_t camera_deinit(void)
 //         vTaskDelay(5000 / portTICK_PERIOD_MS);
 //     }
 // }
+
+// Function implementation: save JPEG data to SD card with timestamp filename
+static esp_err_t save_jpeg_to_sd(const uint8_t *jpeg_data, size_t jpeg_size)
+{
+    if (!sd_card_available) {
+        ESP_LOGW(TAG, "SD card not available, skipping save");
+        return ESP_FAIL;
+    }
+
+    // Get current time for filename
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    
+    // Create filename with timestamp: YYYYMMDD_HHMMSS.jpg
+    char filename[64];
+    snprintf(filename, sizeof(filename), "/sdcard/%04d%02d%02d_%02d%02d%02d.jpg",
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    
+    ESP_LOGI(TAG, "Saving image to: %s", filename);
+    
+    FILE *file = fopen(filename, "wb");
+    if (file == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for writing: %s", filename);
+        return ESP_FAIL;
+    }
+    
+    size_t written = fwrite(jpeg_data, 1, jpeg_size, file);
+    fclose(file);
+    
+    if (written != jpeg_size) {
+        ESP_LOGE(TAG, "Failed to write complete image (wrote %zu of %zu bytes)", written, jpeg_size);
+        return ESP_FAIL;
+    }
+    
+    ESP_LOGI(TAG, "✓ Image saved successfully (%zu bytes)", jpeg_size);
+    return ESP_OK;
+}

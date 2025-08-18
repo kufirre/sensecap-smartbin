@@ -10,18 +10,41 @@
 #include "sensecap-watcher.h"
 #include "ui/ui.h"
 
+// Camera resolution constants (matches camera.c)
+#define IMG_WIDTH  640
+#define IMG_HEIGHT 480
+
 static const char *TAG = "SMARTBIN_MAIN";
 
-// Button callback for capturing a picture
+// Button callback for capturing a picture (short press)
 static void button_capture_callback(void)
 {
-  ESP_LOGI(TAG, "Button pressed - capturing picture");
+  ESP_LOGI(TAG, "Short press - capturing picture with flash");
   
-  if (camera_capture_picture(true) == ESP_OK) {  // Enable flash for button captures
+  if (camera_capture_picture(true, true) == ESP_OK) {  // Enable flash and SD save for button captures
     ESP_LOGI(TAG, "✓ Picture capture initiated");
   } else {
     ESP_LOGE(TAG, "✗ Failed to capture picture");
   }
+}
+
+// Button callback for power management (long press)
+static void button_power_callback(void)
+{
+  ESP_LOGI(TAG, "Long press - initiating system shutdown/restart");
+  
+  // Turn off RGB LED
+  ui_rgb_off();
+  
+  // Display shutdown message
+  ui_show_status("Shutting down...");
+  
+  // Small delay to show message
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  
+  // System shutdown or restart
+  ESP_LOGI(TAG, "System shutdown initiated by user");
+  bsp_system_shutdown();  // This will put the device into deep sleep
 }
 
 // // Task handles for OpenAI realtime functionality
@@ -66,8 +89,8 @@ extern "C" void app_main(void)
   camera_get_info();
 
   // Initialize button using UI component
-  ESP_LOGI(TAG, "Initializing button for picture capture...");
-  if (ui_button_init(button_capture_callback) != ESP_OK) {
+  ESP_LOGI(TAG, "Initializing button (short=capture, long=power)...");
+  if (ui_button_init(button_capture_callback, button_power_callback) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize button");
   }
 
@@ -75,8 +98,8 @@ extern "C" void app_main(void)
   ESP_LOGI(TAG, "Camera ready for picture capture");
 
   ESP_LOGI(TAG, "SenseCap SmartBin camera module ready!");
-  ESP_LOGI(TAG, "Features: Picture capture with AI inference");
-  ESP_LOGI(TAG, "Controls: Long press button to capture picture");
+  ESP_LOGI(TAG, "Features: Picture capture at %dx%d with flash", IMG_WIDTH, IMG_HEIGHT);
+  ESP_LOGI(TAG, "Controls: Short press = capture picture, Long press = power off");
 
   // Main application loop
   for (;;) {

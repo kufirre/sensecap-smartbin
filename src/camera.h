@@ -51,12 +51,14 @@ esp_err_t camera_stop_streaming(void);
 /**
  * @brief Capture a single picture and display it
  * 
- * Takes a single photo and displays it on the screen
+ * Takes a single photo and displays it on the screen.
+ * Optionally saves the image to SD card with timestamp filename.
  * 
  * @param enable_flash Whether to use LED flash before capture
+ * @param save_to_sd Whether to save image to SD card (if available)
  * @return ESP_OK on success, ESP_FAIL on error
  */
-esp_err_t camera_capture_picture(bool enable_flash);
+esp_err_t camera_capture_picture(bool enable_flash, bool save_to_sd);
 
 /**
  * @brief Get camera module information
