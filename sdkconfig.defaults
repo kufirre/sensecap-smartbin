@@ -19,8 +19,8 @@ CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=n
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 CONFIG_ESP_INT_WDT_TIMEOUT_MS=10000
-# Reduce main task stack size to match working example
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584
+# Increase main task stack size for webserver ETag computation
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # Disable watchdogs to avoid conflicts during WebRTC operation (from working example)
 CONFIG_ESP_INT_WDT=n
 CONFIG_ESP_TASK_WDT_EN=n
