@@ -9,6 +9,7 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "webserver.h"
 
 static const char *TAG = "cmd";
 
@@ -207,6 +208,149 @@ static void register_openai_api_key(void)
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 }
 
+/** config show command **/
+static int config_show(int argc, char **argv)
+{
+    smartbin_config_t config = {0};
+    esp_err_t ret = webserver_get_config(&config);
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Current Configuration:");
+        ESP_LOGI(TAG, "  WiFi SSID: %s", config.wifi_ssid[0] ? config.wifi_ssid : "(not set)");
+        ESP_LOGI(TAG, "  WiFi Password: %s", config.wifi_password[0] ? "****" : "(not set)");
+        ESP_LOGI(TAG, "  OpenAI API Key: %s", config.openai_api_key[0] ? "sk-****" : "(not set)");
+        ESP_LOGI(TAG, "  Post Code: %s", config.post_code[0] ? config.post_code : "(not set)");
+        ESP_LOGI(TAG, "  Bin Color: %s", config.bin_color[0] ? config.bin_color : "(not set)");
+    } else {
+        ESP_LOGE(TAG, "No configuration found");
+    }
+    return 0;
+}
+
+static void register_config_show(void)
+{
+    const esp_console_cmd_t cmd = {
+        .command = "config",
+        .help = "Show current configuration",
+        .hint = NULL,
+        .func = &config_show,
+        .argtable = NULL
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+}
+
+/** post code set command **/
+static struct {
+    struct arg_str *code;
+    struct arg_end *end;
+} postcode_args;
+
+static int postcode_set(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &postcode_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, postcode_args.end, argv[0]);
+        return 1;
+    }
+    
+    smartbin_config_t config = {0};
+    webserver_get_config(&config);  // Get existing config
+    
+    if (postcode_args.code->count) {
+        int len = strlen(postcode_args.code->sval[0]);
+        if (len >= sizeof(config.post_code)) {
+            ESP_LOGE(TAG, "Post code too long (max 15 bytes): %s", postcode_args.code->sval[0]);
+            return -1;
+        }
+        strncpy(config.post_code, postcode_args.code->sval[0], sizeof(config.post_code) - 1);
+        config.post_code[sizeof(config.post_code) - 1] = '\0';
+        
+        esp_err_t ret = webserver_set_config(&config);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Post code set to: %s", config.post_code);
+        } else {
+            ESP_LOGE(TAG, "Failed to save post code");
+        }
+    } else {
+        ESP_LOGI(TAG, "Current post code: %s", config.post_code[0] ? config.post_code : "(not set)");
+    }
+    return 0;
+}
+
+static void register_postcode(void)
+{
+    postcode_args.code = arg_str0("c", NULL, "<code>", "Post code (e.g., SW1A 1AA)");
+    postcode_args.end = arg_end(1);
+
+    const esp_console_cmd_t cmd = {
+        .command = "postcode",
+        .help = "Set or view post code",
+        .hint = NULL,
+        .func = &postcode_set,
+        .argtable = &postcode_args
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+}
+
+/** bin color set command **/
+static struct {
+    struct arg_str *color;
+    struct arg_end *end;
+} bincolor_args;
+
+static int bincolor_set(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **) &bincolor_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, bincolor_args.end, argv[0]);
+        return 1;
+    }
+    
+    smartbin_config_t config = {0};
+    webserver_get_config(&config);  // Get existing config
+    
+    if (bincolor_args.color->count) {
+        const char* color = bincolor_args.color->sval[0];
+        // Validate color
+        if (strcmp(color, "red") != 0 && strcmp(color, "blue") != 0 && 
+            strcmp(color, "green") != 0 && strcmp(color, "yellow") != 0 &&
+            strcmp(color, "black") != 0 && strcmp(color, "grey") != 0 && 
+            strcmp(color, "brown") != 0) {
+            ESP_LOGE(TAG, "Invalid color. Valid colors: red, blue, green, yellow, black, grey, brown");
+            return -1;
+        }
+        
+        strncpy(config.bin_color, color, sizeof(config.bin_color) - 1);
+        config.bin_color[sizeof(config.bin_color) - 1] = '\0';
+        
+        esp_err_t ret = webserver_set_config(&config);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Bin color set to: %s", config.bin_color);
+        } else {
+            ESP_LOGE(TAG, "Failed to save bin color");
+        }
+    } else {
+        ESP_LOGI(TAG, "Current bin color: %s", config.bin_color[0] ? config.bin_color : "(not set)");
+        ESP_LOGI(TAG, "Valid colors: red, blue, green, yellow, black, grey, brown");
+    }
+    return 0;
+}
+
+static void register_bincolor(void)
+{
+    bincolor_args.color = arg_str0("c", NULL, "<color>", "Bin color (red, blue, green, yellow, black, grey, brown)");
+    bincolor_args.end = arg_end(1);
+
+    const esp_console_cmd_t cmd = {
+        .command = "bincolor",
+        .help = "Set or view bin color",
+        .hint = NULL,
+        .func = &bincolor_set,
+        .argtable = &bincolor_args
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+}
+
 extern "C" int cmd_init(void)
 {
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
@@ -218,6 +362,9 @@ extern "C" int cmd_init(void)
 
     register_cmd_wifi_sta();
     register_openai_api_key();
+    register_postcode();
+    register_bincolor();
+    register_config_show();
     register_cmd_reboot();
 
 #if defined(CONFIG_ESP_CONSOLE_UART_DEFAULT) || defined(CONFIG_ESP_CONSOLE_UART_CUSTOM)

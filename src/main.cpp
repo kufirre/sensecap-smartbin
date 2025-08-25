@@ -3,12 +3,14 @@
 #include <nvs_flash.h>
 #include "main.h"
 #include "camera.h"
-// #include "wifi.h"
+#include "wifi.h"
+#include "filesystem.h"
 // #include "api.h"
 // #include "council.h"
 // #include "cmd.h"
 #include "sensecap-watcher.h"
 #include "ui/ui.h"
+#include "webserver.h"
 
 // Camera resolution constants (matches camera.c)
 #define IMG_WIDTH  640
@@ -74,8 +76,26 @@ extern "C" void app_main(void)
   // Initialize event loop
   ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+  // Initialize LittleFS for web assets
+  ESP_LOGI(TAG, "Initializing filesystem...");
+  if (filesystem_init() != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to initialize LittleFS - web interface may not work");
+  }
+
   // Initialize board
   board_init();
+
+  // Initialize UI system (must be done before WiFi for status display)
+  ESP_LOGI(TAG, "Initializing UI system...");
+  ui_init();
+
+  // Initialize WiFi management system
+  ESP_LOGI(TAG, "Initializing WiFi management...");
+  smartbin_wifi_init();
+  
+  // Start WiFi connection (will automatically enter AP mode if no credentials)
+  ESP_LOGI(TAG, "Starting WiFi connection...");
+  smartbin_wifi_connect();
 
   // Initialize camera module
   ESP_LOGI(TAG, "Initializing camera module...");
@@ -100,6 +120,7 @@ extern "C" void app_main(void)
   ESP_LOGI(TAG, "SenseCap SmartBin camera module ready!");
   ESP_LOGI(TAG, "Features: Picture capture at %dx%d with flash", IMG_WIDTH, IMG_HEIGHT);
   ESP_LOGI(TAG, "Controls: Short press = capture picture, Long press = power off");
+  ESP_LOGI(TAG, "Configuration: Look for 'SenseCAP-SmartBin-XXXX' WiFi network");
 
   // Main application loop
   for (;;) {
