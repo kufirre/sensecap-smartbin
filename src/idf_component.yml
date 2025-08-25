@@ -1,6 +1,8 @@
 dependencies:
   idf:
     version: ">=5.2.1"
+  # LittleFS filesystem for web assets
+  joltwallet/littlefs: "^1.14.8"
   # Audio components for OpenAI realtime
   espressif/esp_codec_dev: ^1.2.0
   # SRTP for WebRTC
@@ -10,3 +12,5 @@ dependencies:
   # Console support
   espressif/console_cmd_wifi: ^1.0.0
   wvirgil123/esp_jpeg_simd: "^1.0.0"
+  # mDNS for local hostname resolution
+  espressif/mdns: "^1.0"
