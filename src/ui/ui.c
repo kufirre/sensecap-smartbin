@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 #include "sensecap-watcher.h"
 #include "iot_button.h"
+#include "wifi.h"
 
 // Assume images are provided by lvgl assets
 extern const lv_img_dsc_t speaking_A;
@@ -292,4 +293,57 @@ esp_err_t ui_rgb_off(void)
     return ui_set_rgb(0, 0, 0);
 }
 
+void ui_wifi_connected(void)
+{
+    if (lvgl_port_lock(0)) {
+        if (timer2) {
+            lv_timer_del(timer2);
+            timer2 = NULL;
+        }
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+        
+        // Show both IP addresses when connected
+        char* sta_ip = smartbin_wifi_get_ip_address();
+        char* ap_ip = smartbin_wifi_get_ap_ip_address();
+        char status_text[256];
+        snprintf(status_text, sizeof(status_text), 
+                 LV_SYMBOL_WIFI " WiFi Connected\n"
+                 "Device: %s\nConfig: %s", 
+                 sta_ip, ap_ip);
+        lv_label_set_text(label, status_text);
+        
+        lvgl_port_unlock();
+    }
+    ESP_LOGI(UI_TAG, "UI: WiFi Connected - STA IP: %s, AP IP: %s", 
+             smartbin_wifi_get_ip_address(), smartbin_wifi_get_ap_ip_address());
+}
+
+void ui_wifi_config_mode(void)
+{
+    if (lvgl_port_lock(0)) {
+        if (timer2) {
+            lv_timer_del(timer2);
+            timer2 = NULL;
+        }
+        lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+        
+        // Get actual AP IP address
+        char* ap_ip = smartbin_wifi_get_ap_ip_address();
+        char config_text[128];
+        snprintf(config_text, sizeof(config_text), 
+                 LV_SYMBOL_SETTINGS " Configuration Mode\n" LV_SYMBOL_WIFI " IP: %s", ap_ip);
+        lv_label_set_text(label, config_text);
+        
+        lvgl_port_unlock();
+    }
+    ESP_LOGI(UI_TAG, "UI: Configuration Mode");
+}
+
+bool ui_has_display(void)
+{
+    // SenseCAP Watcher has a display
+    return true;
+}
 

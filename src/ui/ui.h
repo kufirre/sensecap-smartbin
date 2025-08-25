@@ -53,6 +53,22 @@ void ui_listening(void);
 void ui_wifi_connecting(void);
 
 /**
+ * @brief Display WiFi connected status
+ * 
+ * Shows "WiFi Connected" text with success indication.
+ * Used when WiFi connection is successfully established.
+ */
+void ui_wifi_connected(void);
+
+/**
+ * @brief Display WiFi configuration mode status
+ * 
+ * Shows "Configuration Mode" text to indicate device is in AP mode.
+ * Used when device is acting as WiFi access point for setup.
+ */
+void ui_wifi_config_mode(void);
+
+/**
  * @brief Display custom status text
  * 
  * Shows provided status text and hides animations.
@@ -108,6 +124,16 @@ esp_err_t ui_set_rgb(uint8_t r, uint8_t g, uint8_t b);
  * @return ESP_OK on success, ESP_FAIL on error
  */
 esp_err_t ui_rgb_off(void);
+
+/**
+ * @brief Check if device has physical display
+ * 
+ * Returns whether the device has a physical display for showing UI elements.
+ * Used to conditionally enable/disable UI features based on hardware.
+ * 
+ * @return true if display is available, false otherwise
+ */
+bool ui_has_display(void);
 
 #ifdef __cplusplus
 }
