@@ -2,15 +2,13 @@
 #include <esp_event.h>
 #include <nvs_flash.h>
 #include "main.h"
-#include "camera.h"
-#include "wifi.h"
-#include "filesystem.h"
-// #include "api.h"
-// #include "council.h"
-// #include "cmd.h"
 #include "sensecap-watcher.h"
 #include "ui/ui.h"
-#include "webserver.h"
+#include "smartbin_webserver.h"
+#include "smartbin_system.h"
+#include "smartbin_wifi.h"
+#include "smartbin_config.h"
+#include "smartbin_button.h"
 
 // Camera resolution constants (matches camera.c)
 #define IMG_WIDTH  640
@@ -18,36 +16,6 @@
 
 static const char *TAG = "SMARTBIN_MAIN";
 
-// Button callback for capturing a picture (short press)
-static void button_capture_callback(void)
-{
-  ESP_LOGI(TAG, "Short press - capturing picture with flash");
-  
-  if (camera_capture_picture(true, true) == ESP_OK) {  // Enable flash and SD save for button captures
-    ESP_LOGI(TAG, "✓ Picture capture initiated");
-  } else {
-    ESP_LOGE(TAG, "✗ Failed to capture picture");
-  }
-}
-
-// Button callback for power management (long press)
-static void button_power_callback(void)
-{
-  ESP_LOGI(TAG, "Long press - initiating system shutdown/restart");
-  
-  // Turn off RGB LED
-  ui_rgb_off();
-  
-  // Display shutdown message
-  ui_show_status("Shutting down...");
-  
-  // Small delay to show message
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  
-  // System shutdown or restart
-  ESP_LOGI(TAG, "System shutdown initiated by user");
-  bsp_system_shutdown();  // This will put the device into deep sleep
-}
 
 // // Task handles for OpenAI realtime functionality
 // static TaskHandle_t webrtc_task_handle = NULL;
@@ -78,12 +46,19 @@ extern "C" void app_main(void)
 
   // Initialize LittleFS for web assets
   ESP_LOGI(TAG, "Initializing filesystem...");
-  if (filesystem_init() != ESP_OK) {
+  if (smartbin_filesystem_init() != ESP_OK) {
     ESP_LOGW(TAG, "Failed to initialize LittleFS - web interface may not work");
   }
 
   // Initialize board
-  board_init();
+  smartbin_board_init();
+
+  // Initialize configuration system (must be done early for API keys)
+  ESP_LOGI(TAG, "Initializing configuration system...");
+  if (smartbin_config_init() != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize configuration system");
+    return;
+  }
 
   // Initialize UI system (must be done before WiFi for status display)
   ESP_LOGI(TAG, "Initializing UI system...");
@@ -99,41 +74,84 @@ extern "C" void app_main(void)
 
   // Initialize camera module
   ESP_LOGI(TAG, "Initializing camera module...");
-  if (camera_init() != ESP_OK) {
+  if (smartbin_camera_init() != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize camera module");
     return;
   }
 
+  // Flash callbacks are now handled automatically by the camera component
+
   // Get camera information
   ESP_LOGI(TAG, "Getting camera module information...");
-  camera_get_info();
-
-  // Initialize button using UI component
-  ESP_LOGI(TAG, "Initializing button (short=capture, long=power)...");
-  if (ui_button_init(button_capture_callback, button_power_callback) != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize button");
-  }
+  smartbin_camera_get_info();
 
   // Camera is ready for picture capture
   ESP_LOGI(TAG, "Camera ready for picture capture");
+
+  // Initialize button handler system
+  ESP_LOGI(TAG, "Initializing button handler system...");
+  if (smartbin_button_init() != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize button handler system");
+    return;
+  }
+  
+  // Start button handler task
+  if (smartbin_button_start() != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to start button handler system");
+    return;
+  }
+
+  // Register button callbacks after system is initialized and started
+  ESP_LOGI(TAG, "Registering button system callbacks...");
+  if (smartbin_button_register_callbacks() != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to register button callbacks");
+    return;
+  }
 
   ESP_LOGI(TAG, "SenseCap SmartBin camera module ready!");
   ESP_LOGI(TAG, "Features: Picture capture at %dx%d with flash", IMG_WIDTH, IMG_HEIGHT);
   ESP_LOGI(TAG, "Controls: Short press = capture picture, Long press = power off");
   ESP_LOGI(TAG, "Configuration: Look for 'SenseCAP-SmartBin-XXXX' WiFi network");
+  
+  ESP_LOGI(TAG, "✅ Button handler system ready");
+  ESP_LOGI(TAG, "📱 Press button: Short=Capture+Analyze, Long=Shutdown");
 
   // Main application loop
+  static bool ui_updated = false;
   for (;;) {
+    // Update UI with WiFi status (once), then switch to Ready
+    if (!ui_updated) {
+      if (smartbin_wifi_is_connected()) {
+        char status_msg[64];
+        snprintf(status_msg, sizeof(status_msg), "smartbin.local\n%s", smartbin_wifi_get_ip_address());
+        ui_show_status(status_msg);
+        ESP_LOGI(TAG, "UI updated: smartbin.local / %s", smartbin_wifi_get_ip_address());
+        
+        // Show WiFi info for 3 seconds, then switch to Ready
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        ui_show_status("Ready");
+        ui_updated = true;
+      } else if (smartbin_wifi_get_state() == SMARTBIN_WIFI_STATE_AP_MODE) {
+        ui_wifi_config_mode();
+        ui_updated = true;
+        ESP_LOGI(TAG, "UI updated with config mode");
+      } else if (smartbin_wifi_get_state() == SMARTBIN_WIFI_STATE_CONNECTING) {
+        ui_wifi_connecting();
+        ESP_LOGI(TAG, "UI showing WiFi connecting");
+      }
+    }
+    
     // Process any background tasks
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
     
     // Periodic status logging
     static int status_counter = 0;
-    if (++status_counter >= 12) { // Every 60 seconds (12 * 5 seconds)
+    if (++status_counter >= 60) { // Every 60 seconds (60 * 1 second)
       status_counter = 0;
-      ESP_LOGI(TAG, "SmartBin status: Camera=%s, Ready=%s", 
-               camera_is_initialized() ? "Active" : "Inactive",
-               camera_is_initialized() ? "YES" : "NO");
+      ESP_LOGI(TAG, "SmartBin status: Camera=%s, WiFi=%s, IP=%s", 
+               smartbin_camera_is_initialized() ? "Active" : "Inactive",
+               smartbin_wifi_is_connected() ? "Connected" : "Disconnected",
+               smartbin_wifi_is_connected() ? smartbin_wifi_get_ip_address() : "None");
     }
   }
 
@@ -145,15 +163,15 @@ extern "C" void app_main(void)
   // // Initialize UI
   // bsp_set_btn_long_press_cb(long_press_event_cb);
   // ui_init();
-  // oai_wifi_init();
+  // smartbin_wifi_init();
   //
   // // Initialize peer connection for WebRTC
   // peer_init();
-  // oai_init_audio_capture();
-  // oai_init_audio_decoder();
+  // smartbin_audio_init_capture();
+  // smartbin_audio_init_decoder();
   //
   // // WiFi connect and wait
-  // oai_wifi();
+  // smartbin_wifi_connect();
   // ui_show_status("WiFi Connected!");
   // vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show status
   //

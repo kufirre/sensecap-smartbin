@@ -8,22 +8,9 @@
 #define LOG_TAG "realtimeapi-sdk"
 #define MAX_HTTP_OUTPUT_BUFFER 2048
 
-extern "C" void oai_wifi(void);
-extern "C" void oai_wifi_init(void);
-extern "C" void oai_init_audio_capture(void);
-extern "C" void oai_init_audio_decoder(void);
-extern "C" void oai_init_audio_encoder();
-extern "C" void oai_send_audio(PeerConnection *peer_connection);
-extern "C" void oai_audio_decode(uint8_t *data, size_t size);
-extern "C" void oai_webrtc();
-extern "C" void oai_http_request(char *offer, char *answer);
+// Legacy function declarations removed - use component functions directly
 
-// Session health monitoring
-extern "C" uint64_t oai_get_last_response_time(void);
-extern "C" void oai_restart_session(void);
-extern "C" bool oai_is_session_healthy(void);
-
-extern "C" int cmd_init(void);
+// Use smartbin_cmd component functions instead
 
 // Voice Activity Detection (VAD) Configuration
 #define VAD_THRESHOLD_VOICE 300          // Volume threshold to detect voice (increased to prevent false triggers)
@@ -34,6 +21,4 @@ extern "C" int cmd_init(void);
 #define SESSION_TIMEOUT_MS 30000         // Restart session if no response for 30 seconds
 #define SESSION_HEALTH_CHECK_INTERVAL_MS 5000  // Check session health every 5 seconds
 
-// Provided by SenseCAP SDK example; declare here for use in app_main
-extern "C" void board_init(void);
-extern "C" void long_press_event_cb(void);
+// Use smartbin_system component functions instead

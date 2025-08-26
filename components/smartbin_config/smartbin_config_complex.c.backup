@@ -1,0 +1,465 @@
+#include "smartbin_config.h"
+
+#include <string.h>
+#include <nvs_flash.h>
+#include <nvs.h>
+#include <esp_log.h>
+#include <esp_system.h>
+#include <esp_check.h>
+
+static const char* TAG = "SMARTBIN_CONFIG";
+static const char* NVS_NAMESPACE = "smartbin_cfg";
+
+// Security constants
+#define AES_KEY_SIZE 32
+#define AES_IV_SIZE  16
+#define CONFIG_SALT_SIZE 16
+
+// NVS keys
+#define NVS_KEY_OPENAI_API    "openai_key"
+#define NVS_KEY_OPENAI_IV     "openai_iv"
+#define NVS_KEY_WIFI_SSID     "wifi_ssid"
+#define NVS_KEY_WIFI_PASSWORD "wifi_pass"
+#define NVS_KEY_CONFIG_SALT   "config_salt"
+
+// Internal state
+static nvs_handle_t g_nvs_handle = 0;
+static bool g_initialized = false;
+static uint8_t g_encryption_key[AES_KEY_SIZE];
+static char g_decrypted_api_key[SMARTBIN_CONFIG_OPENAI_API_KEY_MAX_LEN];
+
+// Generate device-specific encryption key from hardware MAC and stored salt
+static esp_err_t generate_encryption_key(void) {
+    uint8_t mac[6];
+    uint8_t salt[CONFIG_SALT_SIZE];
+    size_t required_size = CONFIG_SALT_SIZE;
+    
+    // Get stored salt or create new one
+    esp_err_t ret = nvs_get_blob(g_nvs_handle, NVS_KEY_CONFIG_SALT, salt, &required_size);
+    if (ret == ESP_ERR_NVS_NOT_FOUND || required_size != CONFIG_SALT_SIZE) {
+        // Generate new random salt
+        esp_fill_random(salt, CONFIG_SALT_SIZE);
+        ret = nvs_set_blob(g_nvs_handle, NVS_KEY_CONFIG_SALT, salt, CONFIG_SALT_SIZE);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to store config salt: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        nvs_commit(g_nvs_handle);
+        ESP_LOGI(TAG, "Generated new configuration salt");
+    }
+    
+    // Get device MAC address
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    
+    // Derive encryption key using SHA-256(MAC + salt)
+    mbedtls_sha256_context sha_ctx;
+    mbedtls_sha256_init(&sha_ctx);
+    mbedtls_sha256_starts(&sha_ctx, 0); // SHA-256
+    mbedtls_sha256_update(&sha_ctx, mac, 6);
+    mbedtls_sha256_update(&sha_ctx, salt, CONFIG_SALT_SIZE);
+    mbedtls_sha256_finish(&sha_ctx, g_encryption_key);
+    mbedtls_sha256_free(&sha_ctx);
+    
+    ESP_LOGD(TAG, "Generated device-specific encryption key");
+    return ESP_OK;
+}
+
+// Encrypt data using AES-256-CBC
+static esp_err_t encrypt_data(const char* plaintext, uint8_t* ciphertext, size_t* ciphertext_len, uint8_t* iv) {
+    if (!plaintext || !ciphertext || !ciphertext_len || !iv) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    size_t plaintext_len = strlen(plaintext);
+    if (plaintext_len == 0 || plaintext_len >= SMARTBIN_CONFIG_OPENAI_API_KEY_MAX_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Generate random IV
+    esp_fill_random(iv, AES_IV_SIZE);
+    
+    // Calculate padded length (PKCS7 padding)
+    size_t padded_len = ((plaintext_len / 16) + 1) * 16;
+    uint8_t* padded_data = calloc(1, padded_len);
+    if (!padded_data) {
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // Copy data and add PKCS7 padding
+    memcpy(padded_data, plaintext, plaintext_len);
+    uint8_t padding = padded_len - plaintext_len;
+    for (size_t i = plaintext_len; i < padded_len; i++) {
+        padded_data[i] = padding;
+    }
+    
+    // Encrypt with AES-256-CBC
+    mbedtls_aes_context aes_ctx;
+    mbedtls_aes_init(&aes_ctx);
+    esp_err_t ret = ESP_OK;
+    
+    if (mbedtls_aes_setkey_enc(&aes_ctx, g_encryption_key, 256) != 0) {
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+    
+    uint8_t iv_copy[AES_IV_SIZE];
+    memcpy(iv_copy, iv, AES_IV_SIZE);
+    
+    if (mbedtls_aes_crypt_cbc(&aes_ctx, MBEDTLS_AES_ENCRYPT, padded_len, 
+                              iv_copy, padded_data, ciphertext) != 0) {
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+    
+    *ciphertext_len = padded_len;
+
+cleanup:
+    mbedtls_aes_free(&aes_ctx);
+    // Securely clear padded data
+    memset(padded_data, 0, padded_len);
+    free(padded_data);
+    return ret;
+}
+
+// Decrypt data using AES-256-CBC
+static esp_err_t decrypt_data(const uint8_t* ciphertext, size_t ciphertext_len, 
+                              char* plaintext, size_t plaintext_max_len, const uint8_t* iv) {
+    if (!ciphertext || !plaintext || !iv || ciphertext_len == 0 || 
+        ciphertext_len % 16 != 0 || plaintext_max_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    uint8_t* decrypted = malloc(ciphertext_len);
+    if (!decrypted) {
+        return ESP_ERR_NO_MEM;
+    }
+    
+    mbedtls_aes_context aes_ctx;
+    mbedtls_aes_init(&aes_ctx);
+    esp_err_t ret = ESP_OK;
+    
+    if (mbedtls_aes_setkey_dec(&aes_ctx, g_encryption_key, 256) != 0) {
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+    
+    uint8_t iv_copy[AES_IV_SIZE];
+    memcpy(iv_copy, iv, AES_IV_SIZE);
+    
+    if (mbedtls_aes_crypt_cbc(&aes_ctx, MBEDTLS_AES_DECRYPT, ciphertext_len,
+                              iv_copy, ciphertext, decrypted) != 0) {
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+    
+    // Remove PKCS7 padding and validate
+    uint8_t padding = decrypted[ciphertext_len - 1];
+    if (padding == 0 || padding > 16) {
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+    
+    size_t actual_len = ciphertext_len - padding;
+    if (actual_len >= plaintext_max_len) {
+        ret = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+    
+    // Verify padding
+    for (size_t i = actual_len; i < ciphertext_len; i++) {
+        if (decrypted[i] != padding) {
+            ret = ESP_FAIL;
+            goto cleanup;
+        }
+    }
+    
+    memcpy(plaintext, decrypted, actual_len);
+    plaintext[actual_len] = '\0';
+
+cleanup:
+    mbedtls_aes_free(&aes_ctx);
+    // Securely clear decrypted data
+    memset(decrypted, 0, ciphertext_len);
+    free(decrypted);
+    return ret;
+}
+
+esp_err_t smartbin_config_init(void) {
+    if (g_initialized) {
+        return ESP_OK;
+    }
+    
+    ESP_LOGI(TAG, "Initializing secure configuration system...");
+    
+    // Initialize NVS if not already done
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS partition was truncated and needs to be erased");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to initialize NVS");
+    
+    // Open NVS handle
+    ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &g_nvs_handle);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to open NVS namespace");
+    
+    // Generate device-specific encryption key
+    ret = generate_encryption_key();
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to generate encryption key");
+    
+    g_initialized = true;
+    ESP_LOGI(TAG, "Configuration system initialized with hardware-based encryption");
+    return ESP_OK;
+}
+
+esp_err_t smartbin_config_deinit(void) {
+    if (!g_initialized) {
+        return ESP_OK;
+    }
+    
+    // Securely clear sensitive data from memory
+    memset(g_encryption_key, 0, sizeof(g_encryption_key));
+    memset(g_decrypted_api_key, 0, sizeof(g_decrypted_api_key));
+    
+    if (g_nvs_handle) {
+        nvs_close(g_nvs_handle);
+        g_nvs_handle = 0;
+    }
+    
+    g_initialized = false;
+    ESP_LOGI(TAG, "Configuration system deinitialized");
+    return ESP_OK;
+}
+
+esp_err_t smartbin_config_set_openai_key(const char* api_key) {
+    if (!g_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!api_key || strlen(api_key) == 0 || strlen(api_key) >= SMARTBIN_CONFIG_OPENAI_API_KEY_MAX_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Encrypt the API key
+    uint8_t ciphertext[SMARTBIN_CONFIG_OPENAI_API_KEY_MAX_LEN * 2]; // Extra space for padding
+    uint8_t iv[AES_IV_SIZE];
+    size_t ciphertext_len = 0;  // Initialize to avoid warning
+    
+    esp_err_t ret = encrypt_data(api_key, ciphertext, &ciphertext_len, iv);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to encrypt API key");
+    
+    // Store encrypted key and IV
+    ret = nvs_set_blob(g_nvs_handle, NVS_KEY_OPENAI_API, ciphertext, ciphertext_len);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to store encrypted API key");
+    
+    ret = nvs_set_blob(g_nvs_handle, NVS_KEY_OPENAI_IV, iv, AES_IV_SIZE);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to store API key IV");
+    
+    ret = nvs_commit(g_nvs_handle);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to commit API key to storage");
+    
+    // Clear cached decrypted key
+    memset(g_decrypted_api_key, 0, sizeof(g_decrypted_api_key));
+    
+    ESP_LOGI(TAG, "OpenAI API key securely stored");
+    return ESP_OK;
+}
+
+const char* smartbin_config_get_openai_key(void) {
+    if (!g_initialized) {
+        ESP_LOGE(TAG, "Configuration not initialized");
+        return NULL;
+    }
+    
+    // Return cached key if available and valid
+    if (strlen(g_decrypted_api_key) > 0) {
+        ESP_LOGD(TAG, "Returning cached API key");
+        return g_decrypted_api_key;
+    }
+    
+    ESP_LOGD(TAG, "Loading and decrypting API key from storage");
+    
+    // Load and decrypt from storage
+    uint8_t ciphertext[SMARTBIN_CONFIG_OPENAI_API_KEY_MAX_LEN * 2];
+    uint8_t iv[AES_IV_SIZE];
+    size_t ciphertext_len = sizeof(ciphertext);
+    size_t iv_len = AES_IV_SIZE;
+    
+    // Clear buffers first
+    memset(ciphertext, 0, sizeof(ciphertext));
+    memset(iv, 0, sizeof(iv));
+    
+    esp_err_t ret = nvs_get_blob(g_nvs_handle, NVS_KEY_OPENAI_API, ciphertext, &ciphertext_len);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGD(TAG, "No OpenAI API key stored");
+        return NULL;
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load encrypted API key: %s", esp_err_to_name(ret));
+        return NULL;
+    }
+    
+    ESP_LOGD(TAG, "Loaded encrypted key, length: %zu", ciphertext_len);
+    
+    ret = nvs_get_blob(g_nvs_handle, NVS_KEY_OPENAI_IV, iv, &iv_len);
+    if (ret != ESP_OK || iv_len != AES_IV_SIZE) {
+        ESP_LOGE(TAG, "Failed to load API key IV - possibly old format or corrupted storage");
+        // Clear the broken entry
+        nvs_erase_key(g_nvs_handle, NVS_KEY_OPENAI_API);
+        nvs_commit(g_nvs_handle);
+        return NULL;
+    }
+    
+    ESP_LOGD(TAG, "Loaded IV, decrypting API key...");
+    
+    // Clear the output buffer first
+    memset(g_decrypted_api_key, 0, sizeof(g_decrypted_api_key));
+    
+    // Decrypt the key
+    ret = decrypt_data(ciphertext, ciphertext_len, g_decrypted_api_key, 
+                       sizeof(g_decrypted_api_key), iv);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to decrypt API key - possibly corrupted or wrong format");
+        memset(g_decrypted_api_key, 0, sizeof(g_decrypted_api_key));
+        // Clear the broken entry
+        nvs_erase_key(g_nvs_handle, NVS_KEY_OPENAI_API);
+        nvs_erase_key(g_nvs_handle, NVS_KEY_OPENAI_IV);
+        nvs_commit(g_nvs_handle);
+        return NULL;
+    }
+    
+    ESP_LOGD(TAG, "Successfully decrypted API key");
+    return g_decrypted_api_key;
+}
+
+bool smartbin_config_has_openai_key(void) {
+    if (!g_initialized) {
+        return false;
+    }
+    
+    size_t required_size = 0;
+    esp_err_t ret = nvs_get_blob(g_nvs_handle, NVS_KEY_OPENAI_API, NULL, &required_size);
+    return (ret == ESP_OK && required_size > 0);
+}
+
+esp_err_t smartbin_config_clear_openai_key(void) {
+    if (!g_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Clear from NVS
+    nvs_erase_key(g_nvs_handle, NVS_KEY_OPENAI_API);
+    nvs_erase_key(g_nvs_handle, NVS_KEY_OPENAI_IV);
+    nvs_commit(g_nvs_handle);
+    
+    // Securely clear from memory
+    memset(g_decrypted_api_key, 0, sizeof(g_decrypted_api_key));
+    
+    ESP_LOGI(TAG, "OpenAI API key cleared");
+    return ESP_OK;
+}
+
+esp_err_t smartbin_config_set_wifi_credentials(const char* ssid, const char* password) {
+    if (!g_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!ssid || strlen(ssid) == 0 || strlen(ssid) >= SMARTBIN_CONFIG_WIFI_SSID_MAX_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (password && strlen(password) >= SMARTBIN_CONFIG_WIFI_PASSWORD_MAX_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    esp_err_t ret = nvs_set_str(g_nvs_handle, NVS_KEY_WIFI_SSID, ssid);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to store WiFi SSID");
+    
+    if (password && strlen(password) > 0) {
+        ret = nvs_set_str(g_nvs_handle, NVS_KEY_WIFI_PASSWORD, password);
+        ESP_RETURN_ON_ERROR(ret, TAG, "Failed to store WiFi password");
+    } else {
+        // Clear password for open networks
+        nvs_erase_key(g_nvs_handle, NVS_KEY_WIFI_PASSWORD);
+    }
+    
+    ret = nvs_commit(g_nvs_handle);
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to commit WiFi credentials");
+    
+    ESP_LOGI(TAG, "WiFi credentials stored for SSID: %s", ssid);
+    return ESP_OK;
+}
+
+esp_err_t smartbin_config_get_wifi_ssid(char* ssid) {
+    if (!g_initialized || !ssid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    size_t required_size = SMARTBIN_CONFIG_WIFI_SSID_MAX_LEN;
+    esp_err_t ret = nvs_get_str(g_nvs_handle, NVS_KEY_WIFI_SSID, ssid, &required_size);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ssid[0] = '\0';
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    return ret;
+}
+
+esp_err_t smartbin_config_get_wifi_password(char* password) {
+    if (!g_initialized || !password) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    size_t required_size = SMARTBIN_CONFIG_WIFI_PASSWORD_MAX_LEN;
+    esp_err_t ret = nvs_get_str(g_nvs_handle, NVS_KEY_WIFI_PASSWORD, password, &required_size);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        password[0] = '\0';
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    return ret;
+}
+
+bool smartbin_config_has_wifi_credentials(void) {
+    if (!g_initialized) {
+        return false;
+    }
+    
+    size_t required_size = 0;
+    esp_err_t ret = nvs_get_str(g_nvs_handle, NVS_KEY_WIFI_SSID, NULL, &required_size);
+    return (ret == ESP_OK && required_size > 1); // > 1 to account for null terminator
+}
+
+esp_err_t smartbin_config_clear_wifi_credentials(void) {
+    if (!g_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    nvs_erase_key(g_nvs_handle, NVS_KEY_WIFI_SSID);
+    nvs_erase_key(g_nvs_handle, NVS_KEY_WIFI_PASSWORD);
+    nvs_commit(g_nvs_handle);
+    
+    ESP_LOGI(TAG, "WiFi credentials cleared");
+    return ESP_OK;
+}
+
+esp_err_t smartbin_config_factory_reset(void) {
+    if (!g_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    ESP_LOGW(TAG, "Performing factory reset - all configuration will be erased");
+    
+    // Erase all keys in our namespace
+    nvs_erase_all(g_nvs_handle);
+    nvs_commit(g_nvs_handle);
+    
+    // Clear sensitive data from memory
+    memset(g_decrypted_api_key, 0, sizeof(g_decrypted_api_key));
+    memset(g_encryption_key, 0, sizeof(g_encryption_key));
+    
+    // Regenerate encryption key (this will create new salt)
+    esp_err_t ret = generate_encryption_key();
+    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to regenerate encryption key");
+    
+    ESP_LOGI(TAG, "Factory reset completed");
+    return ESP_OK;
+}

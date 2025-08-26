@@ -6,7 +6,7 @@
 #include "freertos/task.h"
 #include "sensecap-watcher.h"
 #include "iot_button.h"
-#include "wifi.h"
+#include "smartbin_wifi.h"
 
 // Assume images are provided by lvgl assets
 extern const lv_img_dsc_t speaking_A;

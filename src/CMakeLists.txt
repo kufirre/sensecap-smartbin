@@ -1,6 +1,6 @@
 idf_component_register(
-  SRCS "main.cpp" "camera.c" "api.cpp" "wifi.cpp" "council.cpp" "cmd.cpp" "webserver.c" "webrtc.cpp" "media.cpp" "http.cpp" "filesystem.c" "ui/ui.c" "ui/listening_A.c" "ui/listening_B.c" "ui/listening_C.c" "ui/listening_D.c" "ui/listening_E.c" "ui/speaking_A.c" "ui/speaking_B.c" "ui/speaking_C.c" "ui/speaking_D.c" "ui/speaking_E.c" "board.c"
-  REQUIRES driver esp_wifi nvs_flash esp_http_client esp_http_server json console peer_wrapper esp_codec_dev 78__esp-opus sensecap-watcher esp_lvgl_port esp_io_expander_pca95xx_16bit sscma_client joltwallet__littlefs mdns
+  SRCS "main.cpp" "ui/ui.c" "ui/listening_A.c" "ui/listening_B.c" "ui/listening_C.c" "ui/listening_D.c" "ui/listening_E.c" "ui/speaking_A.c" "ui/speaking_B.c" "ui/speaking_C.c" "ui/speaking_D.c" "ui/speaking_E.c"
+  REQUIRES driver esp_wifi nvs_flash esp_http_client esp_http_server json console peer_wrapper esp_codec_dev 78__esp-opus sensecap-watcher esp_lvgl_port esp_io_expander_pca95xx_16bit sscma_client joltwallet__littlefs mdns smartbin_config smartbin_audio smartbin_http smartbin_webrtc smartbin_webserver smartbin_council smartbin_system smartbin_wifi smartbin_cmd smartbin_button
   INCLUDE_DIRS "." "ui"
 )
 
