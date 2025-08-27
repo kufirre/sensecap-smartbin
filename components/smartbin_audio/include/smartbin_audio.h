@@ -13,6 +13,14 @@ extern "C" {
 typedef struct PeerConnection PeerConnection;
 
 /**
+ * Try to set the speaker output sample rate.
+ * Tries BSP-provided setters first, then codec-dev (if present).
+ *
+ * @param sr_hz Target sample rate in Hz (e.g., 24000).
+ */
+void smartbin_audio_set_out_sr(uint32_t sr_hz);
+
+/**
  * @brief Initialize audio capture system
  * 
  * Initializes the SenseCAP audio codec for microphone capture

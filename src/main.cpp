@@ -9,6 +9,7 @@
 #include "smartbin_wifi.h"
 #include "smartbin_config.h"
 #include "smartbin_button.h"
+#include "smartbin_audio.h"
 
 // Camera resolution constants (matches camera.c)
 #define IMG_WIDTH  640
@@ -52,6 +53,10 @@ extern "C" void app_main(void)
 
   // Initialize board
   smartbin_board_init();
+
+  // Initialize audio I/O early so playback works on first TTS
+  smartbin_audio_init_capture();   // sets up speaker/mic handles + volume
+  smartbin_audio_init_decoder();   // creates Opus decoder for playback
 
   // Initialize configuration system (must be done early for API keys)
   ESP_LOGI(TAG, "Initializing configuration system...");

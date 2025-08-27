@@ -201,10 +201,21 @@ esp_err_t smartbin_http_analyze_waste(const uint8_t* image_data, size_t image_le
   // Step 2: Build JSON request
   ESP_LOGI(TAG, "🔧 Building multimodal API request...");
   
-  // Create main JSON object for vision API
+  // Create main JSON object for multimodal API
   cJSON *root = cJSON_CreateObject();
-  cJSON_AddStringToObject(root, "model", "o4-mini");  // Use standard vision model
-  cJSON_AddNumberToObject(root, "max_tokens", 300);  // Limit response length
+  cJSON_AddStringToObject(root, "model", "gpt-4o-audio-preview");  // Multimodal model with audio output
+  
+  // Add modalities for audio output
+  cJSON *modalities = cJSON_CreateArray();
+  cJSON_AddItemToArray(modalities, cJSON_CreateString("text"));
+  cJSON_AddItemToArray(modalities, cJSON_CreateString("audio"));
+  cJSON_AddItemToObject(root, "modalities", modalities);
+  
+  // Add audio settings
+  cJSON *audio = cJSON_CreateObject();
+  cJSON_AddStringToObject(audio, "voice", "nova");
+  cJSON_AddStringToObject(audio, "format", "opus");
+  cJSON_AddItemToObject(root, "audio", audio);
   
   // Build prompt text with postcode  
   char prompt[1024];
@@ -882,5 +893,333 @@ esp_err_t smartbin_http_analyze_waste_text(const uint8_t* image_data, size_t ima
   cJSON_Delete(root);
   
   ESP_LOGI(TAG, "🎉 Optimized vision analysis completed successfully");
+  return ESP_OK;
+}
+
+// esp_err_t smartbin_http_text_to_speech(const char* text, uint8_t** audio_data, size_t* audio_len) {
+//   ESP_LOGI(TAG, "Starting text-to-speech conversion");
+  
+//   // Check heap status first
+//   size_t free_heap = esp_get_free_heap_size();
+//   ESP_LOGI(TAG, "Heap status: %zu free", free_heap);
+  
+//   // Validate inputs
+//   if (!text || strlen(text) == 0 || !audio_data || !audio_len) {
+//     ESP_LOGE(TAG, "Invalid parameters");
+//     return ESP_ERR_INVALID_ARG;
+//   }
+  
+//   ESP_LOGI(TAG, "Converting text to speech: %s", text);
+  
+//   // Build JSON request for TTS API
+//   ESP_LOGI(TAG, "🔧 Building TTS API request...");
+  
+//   cJSON *root = cJSON_CreateObject();
+//   cJSON_AddStringToObject(root, "model", "tts-1");
+//   cJSON_AddStringToObject(root, "input", text);
+//   cJSON_AddStringToObject(root, "voice", "alloy");
+//   cJSON_AddStringToObject(root, "response_format", "opus");  // Get OPUS for smartbin_audio
+  
+//   char *json_string = cJSON_Print(root);
+//   if (!json_string) {
+//     cJSON_Delete(root);
+//     return ESP_ERR_NO_MEM;
+//   }
+  
+//   ESP_LOGI(TAG, "📤 Sending TTS API request (%zu bytes)...", strlen(json_string));
+  
+//   // Send HTTP POST request to TTS endpoint (no event handler for binary data)
+//   esp_http_client_config_t config = {};
+//   config.url = "https://api.openai.com/v1/audio/speech";
+//   config.method = HTTP_METHOD_POST;
+//   config.timeout_ms = 30000;
+//   config.buffer_size = MAX_HTTP_OUTPUT_BUFFER;
+//   config.buffer_size_tx = 8192;
+  
+//   esp_http_client_handle_t client = esp_http_client_init(&config);
+  
+//   // Get API key from config
+//   smartbin_config_t smartbin_cfg = {};
+//   esp_err_t config_err = smartbin_webserver_get_config(&smartbin_cfg);
+//   if (config_err != ESP_OK || strlen(smartbin_cfg.openai_api_key) == 0) {
+//     ESP_LOGE(TAG, "❌ OpenAI API key not configured");
+//     free(json_string);
+//     cJSON_Delete(root);
+//     esp_http_client_cleanup(client);
+//     return ESP_ERR_NOT_FOUND;
+//   }
+  
+//   // Set headers
+//   char auth_header[512];
+//   snprintf(auth_header, sizeof(auth_header), "Bearer %s", smartbin_cfg.openai_api_key);
+//   esp_http_client_set_header(client, "Authorization", auth_header);
+//   esp_http_client_set_header(client, "Content-Type", "application/json");
+  
+//   // Set request body
+//   esp_http_client_set_post_field(client, json_string, strlen(json_string));
+  
+//   // Perform request
+//   esp_err_t err = esp_http_client_perform(client);
+//   if (err != ESP_OK) {
+//     ESP_LOGE(TAG, "❌ HTTP request failed: %s", esp_err_to_name(err));
+//     free(json_string);
+//     cJSON_Delete(root);
+//     esp_http_client_cleanup(client);
+//     return err;
+//   }
+  
+//   // Check HTTP status
+//   int status_code = esp_http_client_get_status_code(client);
+//   ESP_LOGI(TAG, "📥 TTS HTTP Status: %d", status_code);
+  
+//   if (status_code != 200) {
+//     ESP_LOGE(TAG, "❌ OpenAI TTS API error: status %d", status_code);
+    
+//     // For error responses, try to read error message
+//     char error_buffer[1024];
+//     int error_len = esp_http_client_read_response(client, error_buffer, sizeof(error_buffer) - 1);
+//     if (error_len > 0) {
+//       error_buffer[error_len] = '\0';
+//       ESP_LOGE(TAG, "TTS Error Response: %s", error_buffer);
+//     }
+    
+//     free(json_string);
+//     cJSON_Delete(root);
+//     esp_http_client_cleanup(client);
+//     return ESP_FAIL;
+//   }
+  
+//   // For TTS API, content_length might be -1 (chunked/streaming response)
+//   int content_length = esp_http_client_get_content_length(client);
+//   ESP_LOGI(TAG, "📖 TTS content length: %d bytes", content_length);
+  
+//   // Allocate a reasonable buffer for TTS response (typically 10-50KB for short audio)
+//   const int max_audio_size = 64 * 1024; // 64KB should be enough for short TTS
+//   *audio_data = (uint8_t*)heap_caps_malloc(max_audio_size, MALLOC_CAP_8BIT);
+//   if (!*audio_data) {
+//     ESP_LOGE(TAG, "❌ Failed to allocate audio buffer for %d bytes", max_audio_size);
+//     free(json_string);
+//     cJSON_Delete(root);
+//     esp_http_client_cleanup(client);
+//     return ESP_ERR_NO_MEM;
+//   }
+  
+//   // Read the binary audio response (without knowing exact size)
+//   int bytes_read = esp_http_client_read_response(client, (char*)*audio_data, max_audio_size);
+//   ESP_LOGI(TAG, "📖 TTS response read: %d bytes", bytes_read);
+  
+//   if (bytes_read <= 0) {
+//     ESP_LOGE(TAG, "❌ No TTS audio data read (bytes_read: %d)", bytes_read);
+//     heap_caps_free(*audio_data);
+//     *audio_data = NULL;
+//     *audio_len = 0;
+//     free(json_string);
+//     cJSON_Delete(root);
+//     esp_http_client_cleanup(client);
+//     return ESP_FAIL;
+//   }
+  
+//   // Resize the buffer to actual size to save memory
+//   uint8_t *resized_audio = (uint8_t*)heap_caps_realloc(*audio_data, bytes_read, MALLOC_CAP_8BIT);
+//   if (resized_audio) {
+//     *audio_data = resized_audio;
+//   }
+  
+//   *audio_len = bytes_read;
+//   ESP_LOGI(TAG, "✅ TTS audio data read: %zu bytes", *audio_len);
+  
+//   // Cleanup
+//   free(json_string);
+//   cJSON_Delete(root);
+//   esp_http_client_cleanup(client);
+  
+//   ESP_LOGI(TAG, "🎉 Text-to-speech completed successfully");
+//   return ESP_OK;
+// }
+
+esp_err_t smartbin_http_text_to_speech(const char* text, uint8_t** audio_data, size_t* audio_len) {
+  ESP_LOGI(TAG, "Starting text-to-speech conversion");
+
+  if (!text || !audio_data || !audio_len || strlen(text) == 0) {
+    ESP_LOGE(TAG, "Invalid parameters");
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  *audio_data = NULL;
+  *audio_len = 0;
+
+  // Build JSON request body
+  cJSON *root = cJSON_CreateObject();
+  if (!root) return ESP_ERR_NO_MEM;
+
+  cJSON_AddStringToObject(root, "model", "tts-1");
+  cJSON_AddStringToObject(root, "input", text);
+  cJSON_AddStringToObject(root, "voice", "alloy");
+  // cJSON_AddStringToObject(root, "response_format", "opus");
+  cJSON_AddStringToObject(root, "response_format", "pcm");   // 16-bit signed LE PCM
+
+  char *json_string = cJSON_PrintUnformatted(root);
+  if (!json_string) {
+    cJSON_Delete(root);
+    return ESP_ERR_NO_MEM;
+  }
+  const int body_len = (int)strlen(json_string);
+  ESP_LOGI(TAG, "📤 Sending TTS API request (%d bytes)...", body_len);
+
+  // HTTP client
+  esp_http_client_config_t config = {0};
+  config.url = "https://api.openai.com/v1/audio/speech";
+  config.timeout_ms = 30000; // 30s
+
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (!client) {
+    free(json_string);
+    cJSON_Delete(root);
+    ESP_LOGE(TAG, "Failed to init HTTP client");
+    return ESP_FAIL;
+  }
+
+  // API key
+  smartbin_config_t smartbin_cfg = {};
+  if (smartbin_webserver_get_config(&smartbin_cfg) != ESP_OK ||
+      strlen(smartbin_cfg.openai_api_key) == 0) {
+    esp_http_client_cleanup(client);
+    free(json_string);
+    cJSON_Delete(root);
+    ESP_LOGE(TAG, "❌ OpenAI API key not configured");
+    return ESP_ERR_NOT_FOUND;
+  }
+
+  // Headers + method
+  char auth_header[512];
+  snprintf(auth_header, sizeof(auth_header), "Bearer %s", smartbin_cfg.openai_api_key);
+  esp_http_client_set_method(client, HTTP_METHOD_POST);
+  esp_http_client_set_header(client, "Authorization", auth_header);
+  esp_http_client_set_header(client, "Content-Type", "application/json");
+  // esp_http_client_set_header(client, "Accept", "audio/opus");
+  esp_http_client_set_header(client, "Accept", "audio/pcm");
+  esp_http_client_set_header(client, "Connection", "close"); // make EOF detection simple
+
+  // ---- Open → Write → Fetch headers → Read ----
+  esp_err_t err = esp_http_client_open(client, body_len);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    free(json_string);
+    cJSON_Delete(root);
+    return err;
+  }
+
+  // Write request body (handle partial writes)
+  const char *p = json_string;
+  int remaining = body_len;
+  while (remaining > 0) {
+    int written = esp_http_client_write(client, p, remaining);
+    if (written < 0) {
+      ESP_LOGE(TAG, "HTTP write error");
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      free(json_string);
+      cJSON_Delete(root);
+      return ESP_FAIL;
+    }
+    p += written;
+    remaining -= written;
+  }
+
+  // Block until headers are received so status code becomes valid
+  int64_t hdr_len = esp_http_client_fetch_headers(client);
+  if (hdr_len < 0) {
+    ESP_LOGE(TAG, "Failed to fetch response headers");
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    free(json_string);
+    cJSON_Delete(root);
+    return ESP_FAIL;
+  }
+
+  int status_code = esp_http_client_get_status_code(client);
+  ESP_LOGI(TAG, "📥 TTS HTTP Status: %d", status_code);
+  if (status_code != 200) {
+    // Try to read and log error payload (text/json)
+    char errbuf[1024];
+    int elen = esp_http_client_read(client, errbuf, sizeof(errbuf) - 1);
+    if (elen > 0) {
+      errbuf[elen] = '\0';
+      ESP_LOGE(TAG, "TTS Error Response: %s", errbuf);
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    free(json_string);
+    cJSON_Delete(root);
+    return ESP_FAIL;
+  }
+
+  // Stream read audio (support chunked)
+  const size_t MAX_CAP = 512 * 1024; // safety cap
+  size_t cap = 32 * 1024;
+  uint8_t *buf = (uint8_t*)heap_caps_malloc(cap, MALLOC_CAP_8BIT);
+  if (!buf) {
+    ESP_LOGE(TAG, "❌ OOM for initial audio buffer");
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    free(json_string);
+    cJSON_Delete(root);
+    return ESP_ERR_NO_MEM;
+  }
+
+  size_t total = 0;
+  while (true) {
+    // grow buffer if needed
+    if (cap - total < 4096) {
+      if (cap >= MAX_CAP) {
+        ESP_LOGW(TAG, "Audio too large, truncating at %u bytes", (unsigned)cap);
+        break;
+      }
+      size_t new_cap = cap * 2;
+      if (new_cap > MAX_CAP) new_cap = MAX_CAP;
+      uint8_t *nbuf = (uint8_t*)heap_caps_realloc(buf, new_cap, MALLOC_CAP_8BIT);
+      if (!nbuf) {
+        ESP_LOGW(TAG, "Failed to grow buffer, keeping %u bytes", (unsigned)cap);
+        break;
+      }
+      buf = nbuf;
+      cap = new_cap;
+    }
+
+    int r = esp_http_client_read(client, (char*)(buf + total), cap - total);
+    if (r < 0) {
+      ESP_LOGE(TAG, "HTTP read error");
+      heap_caps_free(buf);
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      free(json_string);
+      cJSON_Delete(root);
+      return ESP_FAIL;
+    }
+    if (r == 0) break; // EOF
+    total += (size_t)r;
+  }
+
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+  free(json_string);
+  cJSON_Delete(root);
+
+  ESP_LOGI(TAG, "📖 Total TTS audio read: %u bytes", (unsigned)total);
+  if (total == 0) {
+    ESP_LOGE(TAG, "❌ No TTS audio data read");
+    heap_caps_free(buf);
+    return ESP_FAIL;
+  }
+
+  // shrink to fit
+  uint8_t *final_buf = (uint8_t*)heap_caps_realloc(buf, total, MALLOC_CAP_8BIT);
+  if (!final_buf) final_buf = buf;
+
+  *audio_data = final_buf;
+  *audio_len = total;
+
+  ESP_LOGI(TAG, "✅ TTS audio data processed: %zu bytes", *audio_len);
   return ESP_OK;
 }

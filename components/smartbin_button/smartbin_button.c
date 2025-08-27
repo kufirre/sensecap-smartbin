@@ -10,6 +10,7 @@
 #include "smartbin_system.h"
 #include "sensecap-watcher.h"
 #include "ui.h"
+#include "smartbin_audio.h"
 
 static const char *TAG = "SMARTBIN_BUTTON";
 
@@ -92,30 +93,49 @@ static void button_handler_task_func(void *pvParameters) {
                         break;
                     }
                     
-                    // Send to OpenAI for analysis
-                    ui_show_status("Analyzing...");
+                    // Step 1: Send to OpenAI for text analysis
+                    ui_show_status("Analyzing image...");
                     const char* postcode = strlen(smartbin_cfg.post_code) > 0 ? smartbin_cfg.post_code : "SW1A 1AA";
                     char* response_text = NULL;
                     
-                    ESP_LOGI(TAG, "🤖 Sending image to OpenAI for analysis (postcode: %s)", postcode);
+                    ESP_LOGI(TAG, "🤖 Step 1: Sending image to OpenAI for text analysis (postcode: %s)", postcode);
                     esp_err_t analysis_result = smartbin_http_analyze_waste_text(image_data, image_len, postcode, &response_text);
                     
                     if (analysis_result == ESP_OK && response_text) {
-                        ESP_LOGI(TAG, "✅ AI analysis completed successfully");
+                        ESP_LOGI(TAG, "✅ Step 1: Vision analysis completed successfully");
                         ESP_LOGI(TAG, "📝 AI Response: %s", response_text);
                         
-                        // Show response on display
-                        ui_show_status("Analysis complete!");
-                        vTaskDelay(pdMS_TO_TICKS(2000));
+                        // Step 2: Convert text to speech
+                        ui_show_status("Converting to speech...");
+                        uint8_t* audio_data = NULL;
+                        size_t audio_len = 0;
                         
-                        // Show AI response text on display for 5 seconds
-                        ui_show_status(response_text);
-                        vTaskDelay(pdMS_TO_TICKS(5000));
+                        ESP_LOGI(TAG, "🗣️ Step 2: Converting text to speech");
+                        esp_err_t tts_result = smartbin_http_text_to_speech(response_text, &audio_data, &audio_len);
+                        
+                        if (tts_result == ESP_OK && audio_data && audio_len > 0) {
+                            ESP_LOGI(TAG, "✅ Step 2: Text-to-speech completed successfully");
+                            ESP_LOGI(TAG, "🎵 Playing audio response: %zu bytes", audio_len);
+                            
+                            // Show status during audio playback
+                            ui_show_status("Playing response...");
+                            
+                            // Play OPUS audio using existing smartbin_audio component
+                            smartbin_audio_decode_and_play(audio_data, audio_len);
+                            
+                            // Clean up audio data
+                            heap_caps_free(audio_data);
+                        } else {
+                            ESP_LOGW(TAG, "⚠️ Text-to-speech failed or no audio data");
+                            // Show text on display as fallback
+                            ui_show_status(response_text);
+                            vTaskDelay(pdMS_TO_TICKS(5000));
+                        }
                         
                         // Clean up response text
                         heap_caps_free(response_text);
                     } else {
-                        ESP_LOGE(TAG, "❌ AI analysis failed: %s", esp_err_to_name(analysis_result));
+                        ESP_LOGE(TAG, "❌ Vision analysis failed: %s", esp_err_to_name(analysis_result));
                         ui_show_status("Analysis failed");
                         vTaskDelay(pdMS_TO_TICKS(3000));
                     }

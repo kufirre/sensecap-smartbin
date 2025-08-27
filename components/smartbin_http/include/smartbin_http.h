@@ -40,6 +40,18 @@ esp_err_t smartbin_http_analyze_waste(const uint8_t* image_data, size_t image_le
 esp_err_t smartbin_http_analyze_waste_text(const uint8_t* image_data, size_t image_len, 
                                           const char* postcode, char** response_text);
 
+/**
+ * @brief Convert text to speech using OpenAI TTS-1 API
+ * 
+ * Sends text to OpenAI's TTS-1 API and returns OPUS audio data.
+ * 
+ * @param text          Text to convert to speech
+ * @param audio_data    Output pointer for decoded OPUS audio data (caller must free)
+ * @param audio_len     Output pointer for audio data length
+ * @return ESP_OK on success, error code on failure
+ */
+esp_err_t smartbin_http_text_to_speech(const char* text, uint8_t** audio_data, size_t* audio_len);
+
 
 /**
  * @brief Send WebRTC offer to OpenAI Realtime API (legacy)

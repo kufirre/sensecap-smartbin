@@ -46,19 +46,56 @@ static volatile bool g_waiting_for_response = false;
 static volatile bool g_openai_currently_speaking = false;
 static volatile uint64_t g_last_openai_audio_time = 0;
 
+// void smartbin_audio_init_capture(void) {
+//   // Initialize SenseCAP codec with optimized settings
+//   bsp_codec_mute_set(true);
+//   bsp_codec_mute_set(false);
+  
+//   // Set optimal volume levels for better audio quality
+//   bsp_codec_volume_set(85, NULL);  // Slightly lower speaker volume to prevent feedback
+  
+//   play_dev_handle = bsp_codec_speaker_get();
+//   record_dev_handle = bsp_codec_microphone_get();
+  
+//   ESP_LOGI(TAG, "Audio capture initialized with optimized settings");
+// }
+
+void smartbin_audio_set_out_sr(uint32_t sr_hz) {
+  if (sr_hz == 0) return;
+
+  // Ensure speaker handle exists
+  if (play_dev_handle == NULL) {
+    play_dev_handle = bsp_codec_speaker_get();
+  }
+
+  // Avoid pop while reconfiguring clocks
+  bsp_codec_mute_set(true);
+
+  // Configure I2S/codec clocks via SenseCAP Watcher BSP
+  // 16-bit mono matches your PCM path
+  esp_err_t err = bsp_codec_set_fs(sr_hz, 16, I2S_SLOT_MODE_MONO);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "bsp_codec_set_fs(%lu Hz, 16-bit, MONO) failed: %s",
+             (unsigned long)sr_hz, esp_err_to_name(err));
+  }
+
+  bsp_codec_mute_set(false);
+}
+
 void smartbin_audio_init_capture(void) {
-  // Initialize SenseCAP codec with optimized settings
   bsp_codec_mute_set(true);
   bsp_codec_mute_set(false);
-  
-  // Set optimal volume levels for better audio quality
-  bsp_codec_volume_set(85, NULL);  // Slightly lower speaker volume to prevent feedback
-  
-  play_dev_handle = bsp_codec_speaker_get();
+  bsp_codec_volume_set(85, NULL);
+
+  play_dev_handle   = bsp_codec_speaker_get();
   record_dev_handle = bsp_codec_microphone_get();
-  
+
+  // Default to 24 kHz to match TTS PCM
+  smartbin_audio_set_out_sr(24000);
+
   ESP_LOGI(TAG, "Audio capture initialized with optimized settings");
 }
+
 
 void smartbin_audio_init_decoder(void) {
   ESP_LOGI(TAG, "Initializing OPUS audio decoder");
@@ -120,6 +157,12 @@ void smartbin_audio_init_encoder(void) {
 void smartbin_audio_send(PeerConnection *peer_connection) {
   static int call_count = 0;
   static uint64_t last_log_time = 0;
+  // Simple VAD with feedback prevention
+  static bool is_transmitting = false;
+  static int voice_frames = 0;
+  static int silence_frames = 0;
+  static int send_count = 0;
+  static uint64_t total_sent = 0;
   
   if (opus_encoder == NULL || encoder_input_buffer == NULL || encoder_output_buffer == NULL) {
     ESP_LOGW(TAG, "OPUS encoder not initialized");
@@ -135,16 +178,6 @@ void smartbin_audio_send(PeerConnection *peer_connection) {
     ESP_LOGW(TAG, "record_dev_handle is NULL - audio capture not initialized");
     return;
   }
-  
-  // Read fresh audio from microphone every time
-  esp_codec_dev_read(record_dev_handle, encoder_input_buffer, BUFFER_SAMPLES);
-
-  // Simple VAD with feedback prevention
-  static bool is_transmitting = false;
-  static int voice_frames = 0;
-  static int silence_frames = 0;
-  static int send_count = 0;
-  static uint64_t total_sent = 0;
   
   // Calculate volume level
   int32_t volume_sum = 0;
@@ -163,6 +196,9 @@ void smartbin_audio_send(PeerConnection *peer_connection) {
     }
     return;
   }
+
+  // Only read mic when we’re actually listening
+  esp_codec_dev_read(record_dev_handle, encoder_input_buffer, BUFFER_SAMPLES);
   
   // Basic VAD logic
   bool voice_detected = avg_volume > VAD_THRESHOLD_VOICE;
@@ -219,82 +255,111 @@ void smartbin_audio_send(PeerConnection *peer_connection) {
   }
 }
 
+// void smartbin_audio_decode_and_play(uint8_t *data, size_t size) {
+//   if (opus_decoder == NULL || output_buffer == NULL) {
+//     ESP_LOGW(TAG, "OPUS decoder not initialized");
+//     return;
+//   }
+  
+//   // Enhanced debug logging for OpenAI audio responses with speaking state management
+//   static int packet_count = 0;
+//   static uint64_t total_bytes = 0;
+//   static uint64_t last_substantial_audio_time = 0;
+//   static bool currently_playing_speech = false;
+//   static int consecutive_silence_packets = 0;
+  
+//   packet_count++;
+//   total_bytes += size;
+//   uint64_t current_time = esp_timer_get_time() / 1000; // milliseconds
+  
+//   int decoded_size = opus_decode(opus_decoder, data, size, output_buffer, BUFFER_SAMPLES_CNT, 0);
+  
+//   // Only treat packets > 100 bytes as substantial speech content
+//   // 72-byte packets are typically silence/comfort noise
+//   if (size > 100) {
+//     // Log substantial speech less frequently to reduce spam
+//     if (packet_count % 50 == 0 || !currently_playing_speech) {
+//       ESP_LOGI(TAG, "🗣️ OpenAI Speech #%d: %d bytes → %d samples (Total: %llu bytes)", 
+//                packet_count, size, decoded_size, total_bytes);
+//     }
+    
+//     // Update global state for VAD coordination
+//     g_openai_currently_speaking = true;
+//     g_last_openai_audio_time = current_time;
+    
+//     // Track when we received a response from OpenAI
+//     g_last_response_time = current_time;
+//     g_waiting_for_response = false;  // We got a response
+    
+//     // Reset silence counter when we get substantial audio
+//     consecutive_silence_packets = 0;
+    
+//     if (!currently_playing_speech) {
+//       currently_playing_speech = true;
+//       ESP_LOGI(TAG, "🎤 Started OpenAI speech playback - VAD DISABLED to prevent feedback");
+//     }
+//     last_substantial_audio_time = current_time;
+//   } else {
+//     // Track consecutive silence packets to detect true end of speech
+//     consecutive_silence_packets++;
+    
+//     // Log substantial audio periodically to avoid spam
+//     if (packet_count % 100 == 0) {
+//       ESP_LOGI(TAG, "🔇 Silence packet #%d: %d bytes (Total: %llu bytes, consecutive silence: %d)", 
+//                packet_count, size, total_bytes, consecutive_silence_packets);
+//     }
+//   }
+  
+//   // Switch back to listening mode based on both time and consecutive silence packets
+//   bool enough_time_passed = (current_time - last_substantial_audio_time) > 2000; // 2 seconds for buffering
+//   bool enough_silence_packets = consecutive_silence_packets >= 25; // ~25 packets = ~500ms of confirmed silence
+  
+//   if (currently_playing_speech && enough_time_passed && enough_silence_packets) {
+//     uint64_t silence_duration = current_time - last_substantial_audio_time;
+//     int silence_count = consecutive_silence_packets;
+    
+//     currently_playing_speech = false;
+//     g_openai_currently_speaking = false;
+//     consecutive_silence_packets = 0; // Reset counter
+//     ESP_LOGI(TAG, "🎧 Returned to listening mode after %llums + %d silence packets - audio truly finished", 
+//              silence_duration, silence_count);
+//   }
+  
+//   if (decoded_size > 0) {
+//     esp_codec_dev_write(play_dev_handle, output_buffer, BUFFER_SAMPLES_CNT * sizeof(opus_int16));
+//   } else {
+//     ESP_LOGW(TAG, "OPUS decode failed: %d", decoded_size);
+//   }
+// }
+
 void smartbin_audio_decode_and_play(uint8_t *data, size_t size) {
-  if (opus_decoder == NULL || output_buffer == NULL) {
-    ESP_LOGW(TAG, "OPUS decoder not initialized");
+  if (play_dev_handle == NULL) smartbin_audio_init_capture();
+
+  if (!data || size == 0) {
+    ESP_LOGW(TAG, "No audio data to play");
     return;
   }
-  
-  // Enhanced debug logging for OpenAI audio responses with speaking state management
-  static int packet_count = 0;
-  static uint64_t total_bytes = 0;
-  static uint64_t last_substantial_audio_time = 0;
-  static bool currently_playing_speech = false;
-  static int consecutive_silence_packets = 0;
-  
-  packet_count++;
-  total_bytes += size;
-  uint64_t current_time = esp_timer_get_time() / 1000; // milliseconds
-  
-  int decoded_size = opus_decode(opus_decoder, data, size, output_buffer, BUFFER_SAMPLES_CNT, 0);
-  
-  // Only treat packets > 100 bytes as substantial speech content
-  // 72-byte packets are typically silence/comfort noise
-  if (size > 100) {
-    // Log substantial speech less frequently to reduce spam
-    if (packet_count % 50 == 0 || !currently_playing_speech) {
-      ESP_LOGI(TAG, "🗣️ OpenAI Speech #%d: %d bytes → %d samples (Total: %llu bytes)", 
-               packet_count, size, decoded_size, total_bytes);
-    }
-    
-    // Update global state for VAD coordination
-    g_openai_currently_speaking = true;
-    g_last_openai_audio_time = current_time;
-    
-    // Track when we received a response from OpenAI
-    g_last_response_time = current_time;
-    g_waiting_for_response = false;  // We got a response
-    
-    // Reset silence counter when we get substantial audio
-    consecutive_silence_packets = 0;
-    
-    if (!currently_playing_speech) {
-      currently_playing_speech = true;
-      ESP_LOGI(TAG, "🎤 Started OpenAI speech playback - VAD DISABLED to prevent feedback");
-    }
-    last_substantial_audio_time = current_time;
-  } else {
-    // Track consecutive silence packets to detect true end of speech
-    consecutive_silence_packets++;
-    
-    // Log substantial audio periodically to avoid spam
-    if (packet_count % 100 == 0) {
-      ESP_LOGI(TAG, "🔇 Silence packet #%d: %d bytes (Total: %llu bytes, consecutive silence: %d)", 
-               packet_count, size, total_bytes, consecutive_silence_packets);
-    }
+
+  // If someone accidentally sent Ogg Opus, bail clearly.
+  if (size >= 4 && memcmp(data, "OggS", 4) == 0) {
+    ESP_LOGW(TAG, "Received Ogg Opus container — set TTS response_format=pcm");
+    return;
   }
-  
-  // Switch back to listening mode based on both time and consecutive silence packets
-  bool enough_time_passed = (current_time - last_substantial_audio_time) > 2000; // 2 seconds for buffering
-  bool enough_silence_packets = consecutive_silence_packets >= 25; // ~25 packets = ~500ms of confirmed silence
-  
-  if (currently_playing_speech && enough_time_passed && enough_silence_packets) {
-    uint64_t silence_duration = current_time - last_substantial_audio_time;
-    int silence_count = consecutive_silence_packets;
-    
-    currently_playing_speech = false;
-    g_openai_currently_speaking = false;
-    consecutive_silence_packets = 0; // Reset counter
-    ESP_LOGI(TAG, "🎧 Returned to listening mode after %llums + %d silence packets - audio truly finished", 
-             silence_duration, silence_count);
-  }
-  
-  if (decoded_size > 0) {
-    esp_codec_dev_write(play_dev_handle, output_buffer, BUFFER_SAMPLES_CNT * sizeof(opus_int16));
+
+  g_openai_currently_speaking = true;
+  esp_err_t w = esp_codec_dev_write(play_dev_handle, data, size);
+  g_openai_currently_speaking = false;
+
+  if (w != ESP_OK) {
+    ESP_LOGW(TAG, "PCM write failed: %s", esp_err_to_name(w));
   } else {
-    ESP_LOGW(TAG, "OPUS decode failed: %d", decoded_size);
+    // duration = (bytes / 2) samples / 24000 Hz
+    uint32_t ms = (uint32_t)((size / 2) * 1000 / 24000);
+    ESP_LOGI(TAG, "🔊 Played PCM: %u bytes (~%u ms at 24 kHz)", (unsigned)size, ms);
   }
 }
+
+
 
 uint64_t smartbin_audio_get_last_response_time(void) {
     return g_last_response_time;
